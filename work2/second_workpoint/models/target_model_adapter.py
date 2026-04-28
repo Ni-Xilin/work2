@@ -1,8 +1,8 @@
 """Target model factory for the second work point.
 
-This module serves both the legacy stub path and the new ``torch_real`` path:
-keep the default stub for fast tests, or set ``target_model_mode=torch`` in
-the config to load the real top-level ``target_model`` code and weights.
+当前只保留真实 torch target model 路径：
+根据配置加载最外层 `target_model/` 中的真实代码与权重，
+并在训练时保持其参数冻结。
 """
 
 from __future__ import annotations
@@ -12,15 +12,10 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-import numpy as np
-
 from second_workpoint.config import ExperimentConfig
-from second_workpoint.models.target_model_stub import FrozenTargetModelStub
 
 
 def build_target_model(config: ExperimentConfig):
-    if config.target_model_mode == "stub":
-        return FrozenTargetModelStub(config)
     return build_torch_target_model(config)
 
 
@@ -192,11 +187,8 @@ def _load_module(module_path: Path, module_name: str) -> ModuleType:
 
 
 def _resolve_checkpoint(config: ExperimentConfig, default_relative_path: str) -> Path:
-    configured = Path(config.target_model_path)
-    if str(configured) and str(configured) != "work2/outputs/target_stub":
-        checkpoint = configured
-    else:
-        checkpoint = Path(config.target_model_root) / default_relative_path
+    configured = str(config.target_model_path).strip()
+    checkpoint = Path(configured) if configured else Path(config.target_model_root) / default_relative_path
     checkpoint = checkpoint.resolve()
     if not checkpoint.exists():
         raise FileNotFoundError(f"Target model checkpoint not found: {checkpoint}")

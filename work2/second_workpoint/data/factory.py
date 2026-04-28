@@ -1,19 +1,16 @@
 """数据集工厂模块。
-这个文件负责根据配置选择 stub 数据集或真实数据集，
-让训练器不必直接依赖某个具体数据实现。"""
+
+第二工作点当前只支持真实数据路径，
+这里负责在 DeepCorr 和 DeepCoFFEA 两个真实数据集实现之间切换。
+"""
 
 from __future__ import annotations
 
 from second_workpoint.config import ExperimentConfig
 from second_workpoint.data.real_dataset import DeepCoffeaRealDataset, DeepCorrRealDataset
-from second_workpoint.data.stub_dataset import StubFlowDataset
-
 
 def build_dataset(config: ExperimentConfig, split: str):
     """根据配置构造数据集实例。"""
-
-    if config.data_loader == "stub":
-        return StubFlowDataset(config, split=split)
 
     dataset_name = config.data.lower()
     if dataset_name in {"deepcorr300", "deepcorr", "mdeepcorr"}:

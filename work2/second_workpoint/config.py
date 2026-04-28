@@ -1,6 +1,11 @@
-"""配置模块。
-这个文件负责加载和校验第二工作点最小训练骨架所需的参数。
-字段命名尽量贴近 Generator_Trainer 中已有的参数，便于后续替换为真实训练代码。"""
+"""第二工作点真实训练配置。
+
+当前仓库只保留 ``torch_real`` 主线：
+- 真实数据加载
+- 冻结 Hugging Face backbone
+- 冻结 torch target model
+- 可切换的 ``learned_prototypes`` / ``text_prototypes`` 语义对齐
+"""
 
 from __future__ import annotations
 
@@ -14,31 +19,30 @@ from typing import Any
 class ExperimentConfig:
     random_seed: int = 2025
     is_training: int = 1
-    model_id: str = "second_workpoint_stub"
-    model: str = "SecondWorkpointStub"
-    target_model: str = "Deepcorr300Stub"
-    target_model_mode: str = "stub"
+    model_id: str = "second_workpoint_torch_real"
+    model: str = "SecondWorkpointTorchRealModel"
+    target_model: str = "Deepcorr300"
+    target_model_mode: str = "torch"
     target_model_root: str = "target_model"
     adv_type: str = "time_and_size"
-    target_model_path: str = "work2/outputs/target_stub"
+    target_model_path: str = ""
     target_model_dropout: float = 0.0
     deepcoffea_tor_len: int = 500
     deepcoffea_exit_len: int = 800
     deepcoffea_missing_exit_policy: str = "zero"
-    base_model_name: str = "Qwen2.5-7B-Instruct-Stub"
-    backbone_mode: str = "stub"
+    backbone_mode: str = "hf_frozen"
     backbone_model_name: str = "Qwen/Qwen2.5-3B-Instruct"
-    backbone_model_path: str = ""
+    backbone_model_path: str = "base_models/Qwen2.5-3B-Instruct"
     backbone_dtype: str = "float16"
     backbone_quantization: str = "none"
     backbone_device: str = "cuda:0"
     trainable_device: str = "cuda:1"
     target_device: str = "cuda:1"
     flow_size: int = 300
-    data: str = "Deepcorr300Stub"
-    data_loader: str = "stub"
+    data: str = "Deepcorr300"
+    data_loader: str = "real"
     checkpoints: str = "work2/outputs/checkpoints"
-    data_path: str = "work2/outputs/stub_data"
+    data_path: str = "Generator_Trainer/target_model/deepcorr/dataset"
     seq_len: int = 96
     pred_len: int = 48
     patch_len: int = 4
@@ -76,17 +80,12 @@ class ExperimentConfig:
     use_cached_indices: bool = True
     max_train_samples: int = 0
     max_eval_samples: int = 0
-    stub_dataset_size: int = 24
-    eval_dataset_size: int = 8
-    prompt_vocab_size: int = 256
-    prompt_len: int = 12
     backbone_prompt_max_tokens: int = 64
     trainable_width: int = 128
     visual_conv_channels: int = 8
     reprogramming_num_prototypes: int = 32
     semantic_alignment_mode: str = "text_prototypes"
     llm_layers: int = 2
-    target_hidden_dim: int = 64
     tor_row_indices: list[int] = field(default_factory=lambda: [0, 3, 4, 7])
     deepcoffea_prefix: str = "d3_ws5_nw11_thr20_tl500_el800_nt1000"
     deepcoffea_include_tail: bool = True
@@ -100,8 +99,7 @@ class ExperimentConfig:
     max_train_steps: int = 0
     max_eval_steps: int = 0
     log_interval: int = 1
-    backend: str = "numpy_stub"
-    stub_update_scale: float = 0.05
+    backend: str = "torch_real"
 
     def validate(self) -> None:
         if self.flow_size < self.seq_len + self.pred_len:
@@ -116,22 +114,18 @@ class ExperimentConfig:
             raise ValueError("train_epochs 必须大于 0。")
         if self.batch_size <= 0:
             raise ValueError("batch_size 必须大于 0。")
-        if self.prompt_len <= 0:
-            raise ValueError("prompt_len 必须大于 0。")
         if self.backbone_prompt_max_tokens < 0:
             raise ValueError("backbone_prompt_max_tokens 不能为负数。")
-        if self.prompt_vocab_size <= 0:
-            raise ValueError("prompt_vocab_size 必须大于 0。")
         if self.trainable_width <= 0:
             raise ValueError("trainable_width 必须大于 0。")
         if self.trainable_width % self.n_heads != 0:
             raise ValueError("trainable_width 必须能被 n_heads 整除。")
-        if self.data_loader not in {"stub", "real"}:
-            raise ValueError("data_loader 只支持 stub 或 real。")
-        if self.target_model_mode not in {"stub", "torch"}:
-            raise ValueError("target_model_mode must be stub or torch.")
-        if self.backbone_mode not in {"stub", "hf_frozen"}:
-            raise ValueError("backbone_mode must be stub or hf_frozen.")
+        if self.data_loader != "real":
+            raise ValueError("当前第二工作点只支持 data_loader=real。")
+        if self.target_model_mode != "torch":
+            raise ValueError("当前第二工作点只支持 target_model_mode=torch。")
+        if self.backbone_mode != "hf_frozen":
+            raise ValueError("当前第二工作点只支持 backbone_mode=hf_frozen。")
         if self.backbone_dtype not in {"float32", "float16", "bfloat16"}:
             raise ValueError("backbone_dtype must be float32, float16, or bfloat16.")
         if self.backbone_quantization not in {"none", "4bit", "8bit"}:
@@ -158,34 +152,18 @@ class ExperimentConfig:
             raise ValueError("semantic_alignment_mode 只支持 learned_prototypes 或 text_prototypes。")
         if self.gradient_accumulation_steps <= 0:
             raise ValueError("gradient_accumulation_steps 必须大于 0。")
-        if self.backend not in {"numpy_stub", "torch_real"}:
-            raise ValueError("backend 只支持 numpy_stub 或 torch_real。")
+        if self.backend != "torch_real":
+            raise ValueError("当前第二工作点只支持 backend=torch_real。")
         if self.data_loader == "real" and self.data.lower() in {"deepcoffea", "deepcoffea_real"} and self.eval_split == "val":
             raise ValueError("DeepCoFFEA 当前只有 train/test session 文件，eval_split 不能设置为 val。")
-        if self.backend == "numpy_stub":
-            if self.backbone_mode != "stub":
-                raise ValueError("numpy_stub backend 只能配合 backbone_mode=stub。")
-            if self.target_model_mode not in {"stub", "torch"}:
-                raise ValueError("numpy_stub backend 只支持 stub/torch target model mode。")
-            if self.semantic_alignment_mode != "learned_prototypes":
-                raise ValueError("numpy_stub backend 当前只支持 semantic_alignment_mode=learned_prototypes。")
-        if self.backend == "torch_real":
-            if self.data_loader != "real":
-                raise ValueError("torch_real backend 当前只支持 real dataloader。")
-            if self.backbone_mode != "hf_frozen":
-                raise ValueError("torch_real backend 当前只支持 backbone_mode=hf_frozen。")
-            if self.target_model_mode != "torch":
-                raise ValueError("torch_real backend 当前只支持 target_model_mode=torch。")
-            if not self.backbone_model_name and not self.backbone_model_path:
-                raise ValueError("torch_real backend 需要 backbone_model_name 或 backbone_model_path。")
-            if self.model == "SecondWorkpointTorch":
-                self.model = "SecondWorkpointTorchRealModel"
-            if self.backbone_model_path:
-                self.base_model_name = self.backbone_model_path
-            elif self.backbone_model_name:
-                self.base_model_name = self.backbone_model_name
-            if self.backbone_model_path and not Path(self.backbone_model_path).exists():
-                raise ValueError(f"backbone_model_path 不存在: {self.backbone_model_path}")
+        if not self.backbone_model_name and not self.backbone_model_path:
+            raise ValueError("torch_real backend 需要 backbone_model_name 或 backbone_model_path。")
+        if self.model == "SecondWorkpointTorch":
+            self.model = "SecondWorkpointTorchRealModel"
+        if self.backbone_model_path and not Path(self.backbone_model_path).exists():
+            raise ValueError(f"backbone_model_path 不存在: {self.backbone_model_path}")
+        if self.target_model_path and not Path(self.target_model_path).exists():
+            raise ValueError(f"target_model_path 不存在: {self.target_model_path}")
         self._validate_source_indices(self.tor_row_indices, "tor_row_indices", upper_bound=8)
         self._validate_channel_indices(self.time_channel_indices, "time_channel_indices")
         self._validate_channel_indices(self.size_channel_indices, "size_channel_indices")

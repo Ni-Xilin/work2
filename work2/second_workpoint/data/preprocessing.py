@@ -1,11 +1,12 @@
 """数据预处理辅助模块。
-这个文件负责把真实数据集中的原始流量或会话，整理成第二工作点统一样本接口。
-它只处理“输入成形”这一层：包括窗口切分、时序视图、视觉化结构视图以及 prompt 占位编码。"""
+
+这个文件负责把真实数据集中的原始流量或会话整理成统一样本接口。
+当前只保留真实训练主线，因此 prompt 侧输出的是自然语言 `prompt_text`，
+不再生成任何哈希 `prompt_ids` 占位输入。
+"""
 
 from __future__ import annotations
 
-import hashlib
-import re
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -210,18 +211,6 @@ def build_prompt_text(
     )
 
 
-def encode_prompt_text(prompt_text: str, prompt_len: int, prompt_vocab_size: int) -> np.ndarray:
-    """把 prompt 文本稳定映射成固定长度 token id 序列。
-
-    当前阶段没有接入真实 tokenizer，因此使用稳定哈希占位，保证 dataloader 可跑通。"""
-
-    tokens = re.findall(r"[A-Za-z0-9_.:=+-]+", prompt_text)
-    encoded = np.zeros((prompt_len,), dtype=np.int64)
-    for index, token in enumerate(tokens[:prompt_len]):
-        encoded[index] = _stable_token_to_id(token, prompt_vocab_size)
-    return encoded
-
-
 def build_sample_views(
     config: "ExperimentConfig",
     dataset_name: str,
@@ -249,12 +238,6 @@ def build_sample_views(
         pred_len=config.pred_len,
         patch_len=config.patch_len,
     )
-    prompt_ids = encode_prompt_text(
-        prompt_text=prompt_text,
-        prompt_len=config.prompt_len,
-        prompt_vocab_size=config.prompt_vocab_size,
-    )
-
     prompt_feature_vector = np.asarray(
         [prompt_features[name] for name in PROMPT_FEATURE_ORDER],
         dtype=np.float32,
@@ -268,7 +251,6 @@ def build_sample_views(
         "clean_future": clean_future.T.astype(np.float32),
         "x_ts": build_temporal_view(history_seq, config.patch_len),
         "x_vis": build_visual_view(history_seq, config.patch_len),
-        "prompt_ids": prompt_ids,
         "prompt_text": prompt_text,
         "prompt_features": prompt_feature_vector,
         "future_mask": future_mask,
@@ -286,13 +268,3 @@ def _safe_cv(values: np.ndarray) -> float:
     array = np.asarray(values, dtype=np.float32).reshape(-1)
     mean_value = float(np.mean(np.abs(array)))
     return float(np.std(array) / (mean_value + 1e-6))
-
-
-def _stable_token_to_id(token: str, vocab_size: int) -> int:
-    """把 token 稳定映射成词表索引。"""
-
-    if vocab_size <= 1:
-        return 0
-    digest = hashlib.sha1(token.encode("utf-8")).digest()
-    integer_value = int.from_bytes(digest[:8], byteorder="big", signed=False)
-    return 1 + (integer_value % (vocab_size - 1))

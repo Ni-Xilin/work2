@@ -304,10 +304,7 @@ if nn is not None:
             self,
             history_seq: "torch.Tensor",
             prompt_text: Sequence[str] | None = None,
-            prompt_ids: "torch.Tensor | None" = None,
         ) -> dict[str, "torch.Tensor | dict[str, int]"]:
-            if prompt_ids is not None:
-                raise ValueError("prompt_ids are forbidden on the torch_real model path; pass prompt_text instead.")
             if prompt_text is None:
                 raise ValueError("prompt_text is required on the torch_real model path.")
 

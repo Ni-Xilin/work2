@@ -65,22 +65,12 @@ def _resolve_model_source(config) -> str:
         raise FileNotFoundError(f"Configured backbone_model_path does not exist: {candidate}")
 
     explicit_name = str(getattr(config, "backbone_model_name", "")).strip()
-    if explicit_name:
-        stripped = explicit_name
-    else:
-        stripped = str(getattr(config, "base_model_name", "")).strip()
-    if not stripped:
-        raise ValueError("A real Qwen backbone requires backbone_model_path, backbone_model_name, or base_model_name.")
-    if stripped.endswith("-Stub"):
-        stripped = stripped[: -len("-Stub")]
-    candidate = Path(stripped)
+    if not explicit_name:
+        raise ValueError("A real Qwen backbone requires backbone_model_path or backbone_model_name.")
+    candidate = Path(explicit_name)
     if candidate.exists():
         return str(candidate)
-    if "/" in stripped:
-        return stripped
-    if stripped.startswith("Qwen"):
-        return f"Qwen/{stripped}"
-    return stripped
+    return explicit_name
 
 
 def _resolve_device(config) -> "torch.device":
@@ -106,9 +96,7 @@ if nn is not None:
             self.config = config
             self.model_name = _resolve_model_source(config)
             self.device = _resolve_device(config)
-            self.max_prompt_tokens = int(
-                getattr(config, "backbone_prompt_max_tokens", getattr(config, "prompt_len", 0))
-            )
+            self.max_prompt_tokens = int(getattr(config, "backbone_prompt_max_tokens", 0))
             self.model_dtype = resolve_torch_dtype(str(getattr(config, "backbone_dtype", "float16")))
             self.quantization = str(getattr(config, "backbone_quantization", "none"))
 
