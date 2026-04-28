@@ -1,6 +1,11 @@
 """运行时工具模块。
-这个文件负责随机种子、运行设备描述、目录创建、数值算子和 JSON/NPZ 落盘等通用动作，
-让训练器本身只关注训练流程。"""
+
+这里保留真实训练主线需要的通用动作：
+- 随机种子
+- 设备与 dtype 解析
+- JSON 落盘
+- 参数统计
+"""
 
 from __future__ import annotations
 
@@ -27,16 +32,12 @@ def seed_everything(seed: int) -> None:
 
 
 def resolve_device(config: ExperimentConfig) -> str:
-    if config.backend == "numpy_stub":
-        return "numpy(cpu-only stub)"
-    if config.backend == "torch_real":
-        return (
-            f"torch_real(trainable={config.trainable_device}, "
-            f"backbone={config.backbone_device}, target={config.target_device}, "
-            f"dtype={config.backbone_dtype}, quant={config.backbone_quantization}, "
-            f"semantic={config.semantic_alignment_mode})"
-        )
-    return "unknown"
+    return (
+        f"torch_real(trainable={config.trainable_device}, "
+        f"backbone={config.backbone_device}, target={config.target_device}, "
+        f"dtype={config.backbone_dtype}, quant={config.backbone_quantization}, "
+        f"semantic={config.semantic_alignment_mode})"
+    )
 
 
 def import_torch():
@@ -72,24 +73,8 @@ def ensure_dir(path: str | Path) -> Path:
     return directory
 
 
-def gelu(values: np.ndarray) -> np.ndarray:
-    return 0.5 * values * (1.0 + np.tanh(np.sqrt(2.0 / np.pi) * (values + 0.044715 * np.power(values, 3))))
-
-
 def sigmoid(values: np.ndarray) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-np.clip(values, -30.0, 30.0)))
-
-
-def softmax(values: np.ndarray, axis: int = -1) -> np.ndarray:
-    shifted = values - np.max(values, axis=axis, keepdims=True)
-    exps = np.exp(shifted)
-    return exps / np.sum(exps, axis=axis, keepdims=True)
-
-
-def layer_norm(values: np.ndarray, epsilon: float = 1e-5) -> np.ndarray:
-    mean = values.mean(axis=-1, keepdims=True)
-    variance = np.mean((values - mean) ** 2, axis=-1, keepdims=True)
-    return ((values - mean) / np.sqrt(variance + epsilon)).astype(np.float32)
 
 
 def save_json(path: str | Path, payload: dict) -> None:
@@ -99,22 +84,7 @@ def save_json(path: str | Path, payload: dict) -> None:
         json.dump(_to_python(payload), file, ensure_ascii=False, indent=2)
 
 
-def save_npz(path: str | Path, payload: dict[str, np.ndarray]) -> None:
-    target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    np.savez(target, **{name: np.asarray(value) for name, value in payload.items()})
-
-
 def count_parameters(module: Any) -> tuple[int, int]:
-    if hasattr(module, "parameter_specs"):
-        total = 0
-        trainable = 0
-        for _, value, requires_grad in module.parameter_specs():
-            size = int(np.asarray(value).size)
-            total += size
-            if requires_grad:
-                trainable += size
-        return total, trainable
     if hasattr(module, "parameters"):
         total = 0
         trainable = 0
@@ -124,7 +94,7 @@ def count_parameters(module: Any) -> tuple[int, int]:
             if bool(getattr(parameter, "requires_grad", False)):
                 trainable += size
         return total, trainable
-    raise TypeError("module 必须实现 parameter_specs() 才能统计参数。")
+    raise TypeError("module 必须实现 parameters() 才能统计参数。")
 
 
 def _to_python(value: Any) -> Any:

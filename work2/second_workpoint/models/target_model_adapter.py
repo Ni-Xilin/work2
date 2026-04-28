@@ -10,7 +10,6 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 from types import ModuleType
-from typing import Any
 
 from second_workpoint.config import ExperimentConfig
 
@@ -65,24 +64,14 @@ class DeepCorrTorchTarget:
             parameter.requires_grad = False
 
     def forward(self, adv_flow):
-        if _is_torch_tensor(adv_flow):
-            flow = _prepare_deepcorr_flow_torch(
-                adv_flow=adv_flow,
-                expected_length=self._EXPECTED_LENGTHS[self.variant],
-                tor_row_indices=self.config.tor_row_indices,
-                torch_module=self.torch,
-                device=self.device,
-            )
-            return self.model(flow, dropout=float(self.config.target_model_dropout))
-
-        flow = _prepare_deepcorr_flow_numpy(
+        flow = _prepare_deepcorr_flow_torch(
             adv_flow=adv_flow,
             expected_length=self._EXPECTED_LENGTHS[self.variant],
             tor_row_indices=self.config.tor_row_indices,
+            torch_module=self.torch,
+            device=self.device,
         )
-        tensor = self.torch.from_numpy(flow).to(self.device)
-        logits = self.model(tensor, dropout=float(self.config.target_model_dropout))
-        return logits.detach().cpu().numpy().astype(np.float32)
+        return self.model(flow, dropout=float(self.config.target_model_dropout))
 
     def parameters(self):
         return self.model.parameters()
@@ -114,39 +103,25 @@ class DeepCoFFEATorchTarget:
             module_parameter.requires_grad = False
 
     def forward(self, adv_flow):
-        if _is_torch_tensor(adv_flow):
-            tor_input = _prepare_deepcoffea_flat_flow_torch(
-                adv_flow=adv_flow,
-                target_length=self.config.deepcoffea_tor_len,
-                torch_module=self.torch,
-                device=self.device,
-            )
-            exit_input = self.torch.zeros(
-                (tor_input.shape[0], self.config.deepcoffea_exit_len * 2),
-                dtype=tor_input.dtype,
-                device=tor_input.device,
-            )
-            anchor_embedding = self.anchor(tor_input)
-            exit_embedding = self.pandn(exit_input)
-            if anchor_embedding.ndim == 1:
-                anchor_embedding = anchor_embedding.unsqueeze(0)
-            if exit_embedding.ndim == 1:
-                exit_embedding = exit_embedding.unsqueeze(0)
-            logits = self.torch.nn.functional.cosine_similarity(anchor_embedding, exit_embedding, dim=-1)
-            return logits.reshape(-1, 1)
-
-        tor_input = _prepare_deepcoffea_flat_flow_numpy(adv_flow, self.config.deepcoffea_tor_len)
-        exit_input = np.zeros((tor_input.shape[0], self.config.deepcoffea_exit_len * 2), dtype=np.float32)
-        tor_tensor = self.torch.from_numpy(tor_input).to(self.device)
-        exit_tensor = self.torch.from_numpy(exit_input).to(self.device)
-        anchor_embedding = self.anchor(tor_tensor)
-        exit_embedding = self.pandn(exit_tensor)
+        tor_input = _prepare_deepcoffea_flat_flow_torch(
+            adv_flow=adv_flow,
+            target_length=self.config.deepcoffea_tor_len,
+            torch_module=self.torch,
+            device=self.device,
+        )
+        exit_input = self.torch.zeros(
+            (tor_input.shape[0], self.config.deepcoffea_exit_len * 2),
+            dtype=tor_input.dtype,
+            device=tor_input.device,
+        )
+        anchor_embedding = self.anchor(tor_input)
+        exit_embedding = self.pandn(exit_input)
         if anchor_embedding.ndim == 1:
             anchor_embedding = anchor_embedding.unsqueeze(0)
         if exit_embedding.ndim == 1:
             exit_embedding = exit_embedding.unsqueeze(0)
         logits = self.torch.nn.functional.cosine_similarity(anchor_embedding, exit_embedding, dim=-1)
-        return logits.reshape(-1, 1).detach().cpu().numpy().astype(np.float32)
+        return logits.reshape(-1, 1)
 
     def parameters(self):
         yield from self.anchor.parameters()
@@ -157,7 +132,7 @@ def _import_torch():
     try:
         import torch
     except ImportError as exc:
-        raise ImportError("target_model_mode=torch requires PyTorch to be installed.") from exc
+        raise ImportError("Real target model loading requires PyTorch to be installed.") from exc
     return torch
 
 
@@ -193,41 +168,6 @@ def _resolve_checkpoint(config: ExperimentConfig, default_relative_path: str) ->
     if not checkpoint.exists():
         raise FileNotFoundError(f"Target model checkpoint not found: {checkpoint}")
     return checkpoint
-
-
-def _is_torch_tensor(value: Any) -> bool:
-    return hasattr(value, "detach") and hasattr(value, "device") and hasattr(value, "requires_grad")
-
-
-def _prepare_deepcorr_flow_numpy(
-    adv_flow: np.ndarray,
-    expected_length: int,
-    tor_row_indices: list[int],
-) -> np.ndarray:
-    flow = np.asarray(adv_flow, dtype=np.float32)
-    if flow.ndim != 3:
-        raise ValueError(f"DeepCorr target expects flow shape (batch, channels, length), got {flow.shape}")
-    if flow.shape[1] == 8:
-        full_flow = flow
-    elif flow.shape[1] == len(tor_row_indices):
-        full_flow = np.zeros((flow.shape[0], 8, flow.shape[2]), dtype=np.float32)
-        for source_index, target_row in enumerate(tor_row_indices):
-            full_flow[:, int(target_row), :] = flow[:, source_index, :]
-    else:
-        raise ValueError(
-            "DeepCorr target expects either 8-channel target flow or "
-            f"{len(tor_row_indices)}-channel Tor flow, got {flow.shape[1]} channels."
-        )
-
-    if full_flow.shape[2] == expected_length:
-        adjusted = full_flow
-    elif full_flow.shape[2] > expected_length:
-        adjusted = full_flow[:, :, :expected_length]
-    else:
-        adjusted = np.zeros((full_flow.shape[0], 8, expected_length), dtype=np.float32)
-        adjusted[:, :, : full_flow.shape[2]] = full_flow
-
-    return adjusted[:, None, :, :].astype(np.float32)
 
 
 def _prepare_deepcorr_flow_torch(
@@ -269,19 +209,6 @@ def _prepare_deepcorr_flow_torch(
         adjusted[:, :, : full_flow.shape[2]] = full_flow
 
     return adjusted.unsqueeze(1)
-
-
-def _prepare_deepcoffea_flat_flow_numpy(adv_flow: np.ndarray, target_length: int) -> np.ndarray:
-    flow = np.asarray(adv_flow, dtype=np.float32)
-    if flow.ndim != 3:
-        raise ValueError(f"DeepCoFFEA target expects flow shape (batch, channels, length), got {flow.shape}")
-    if flow.shape[1] < 2:
-        raise ValueError("DeepCoFFEA target expects at least ipd and size channels.")
-    tor_flow = flow[:, :2, :]
-    adjusted = np.zeros((flow.shape[0], 2, target_length), dtype=np.float32)
-    copy_length = min(target_length, tor_flow.shape[2])
-    adjusted[:, :, :copy_length] = tor_flow[:, :, :copy_length]
-    return adjusted.reshape(flow.shape[0], target_length * 2).astype(np.float32)
 
 
 def _prepare_deepcoffea_flat_flow_torch(adv_flow, target_length: int, torch_module, device):

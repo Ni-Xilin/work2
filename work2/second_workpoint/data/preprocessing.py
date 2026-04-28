@@ -2,7 +2,7 @@
 
 这个文件负责把真实数据集中的原始流量或会话整理成统一样本接口。
 当前只保留真实训练主线，因此 prompt 侧输出的是自然语言 `prompt_text`，
-不再生成任何哈希 `prompt_ids` 占位输入。
+不再生成任何哈希 token 占位输入。
 """
 
 from __future__ import annotations
