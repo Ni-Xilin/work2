@@ -18,20 +18,20 @@
 | Python 缓存与虚拟环境 | `**/__pycache__/`, `*.py[cod]`, `.pytest_cache/`, `.venv/` | 可自动再生成，提交后只会制造噪声。 |
 | 日志和临时文件 | `*.log`, `*.tmp`, `*.temp` | 一般用于本地调试或中间过程，不具备长期追踪价值。 |
 | 本地数据集与基座模型 | `datasets/`, `base_models/` | 数据与基模型通常体积大、来源外部明确，适合本地挂载或单独管理，不直接进入 Git。 |
+| Augur 主实现目录 | `Generator_Trainer/` | 当前按你的要求整体忽略，表示顶层仓库不再跟踪该目录中的源码、文档、数据和其内部元数据。 |
 | 训练输出与检查点 | `work2/outputs/` | 包括训练摘要、checkpoint、导出权重等派生产物。 |
-| 嵌套仓库元数据 | `Generator_Trainer/.git/` | 只忽略其内部 Git 元数据，不忽略源码本身，避免顶层仓库误收一个嵌套仓库数据库。 |
 | 目标模型派生产物 | `target_model/**/*.pth`, `Generator_Trainer/target_model/**/*.npz` 等 | 针对权重、pickle、npz 这类本地生成或复制进来的二进制实验产物做排除。 |
 
 ## 明确不排除的内容
 
 下面这些内容仍然应该纳入版本控制：
 
-- `Generator_Trainer/` 与 `work2/second_workpoint/` 下的源码文件，例如 `.py`。
+- `work2/second_workpoint/` 下的源码文件，例如 `.py`。
 - `work2/configs/` 下的实验配置文件，例如 `.json`。
 - `work2/docs/` 下的说明文档、方案文档和需要保留的研究记录。
-- `target_model/`、`Generator_Trainer/target_model/` 中的代码文件本身；当前只排除了其中的二进制权重和数据产物，没有排除实现代码。
+- `target_model/` 中的代码文件本身；当前只排除了其中的二进制权重和数据产物，没有排除实现代码。
 
-换句话说，这份规则针对的是“运行时派生物”，不是“研究逻辑本身”。
+换句话说，这份规则默认针对“运行时派生物”和“本地大体量研究资产”；其中 `Generator_Trainer/` 现在被视为本地资产整体排除。
 
 ## 一条实用判断标准
 

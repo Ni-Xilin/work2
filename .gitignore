@@ -28,12 +28,10 @@ env/
 # Local datasets and heavyweight base models
 datasets/
 base_models/
+Generator_Trainer/
 
 # Training outputs and checkpoints
 work2/outputs/
-
-# Nested repository metadata
-Generator_Trainer/.git/
 
 # Generated model/data artifacts kept locally
 target_model/**/*.pth
@@ -41,8 +39,4 @@ target_model/**/*.pt
 target_model/**/*.pickle
 target_model/**/*.p
 target_model/**/*.npz
-Generator_Trainer/target_model/**/*.pth
-Generator_Trainer/target_model/**/*.pt
-Generator_Trainer/target_model/**/*.pickle
-Generator_Trainer/target_model/**/*.p
-Generator_Trainer/target_model/**/*.npz
+Generator_Trainer
