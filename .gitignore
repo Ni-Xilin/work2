@@ -1,0 +1,48 @@
+# OMX / Codex local state
+.omx/
+.codex
+.codex/
+
+# Editor and OS metadata
+.DS_Store
+.idea/
+.vscode/
+Generator_Trainer/.vscode/
+
+# Python cache and virtual environments
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.venv/
+venv/
+env/
+
+# Local logs and temporary files
+*.log
+*.tmp
+*.temp
+
+# Local datasets and heavyweight base models
+datasets/
+base_models/
+
+# Training outputs and checkpoints
+work2/outputs/
+
+# Nested repository metadata
+Generator_Trainer/.git/
+
+# Generated model/data artifacts kept locally
+target_model/**/*.pth
+target_model/**/*.pt
+target_model/**/*.pickle
+target_model/**/*.p
+target_model/**/*.npz
+Generator_Trainer/target_model/**/*.pth
+Generator_Trainer/target_model/**/*.pt
+Generator_Trainer/target_model/**/*.pickle
+Generator_Trainer/target_model/**/*.p
+Generator_Trainer/target_model/**/*.npz
