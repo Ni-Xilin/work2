@@ -6,7 +6,7 @@ This file applies to the current directory and all subdirectories beneath it.
 
 ## Project Context
 
-This workspace contains an Augur-related research project focused on traffic correlation attack defense. The main implementation lives under `Generator_Trainer/`, and project documents should be written under `work2/docs/` unless the user explicitly asks for a different location.
+This workspace contains the second work point of an Augur-related research project focused on traffic correlation attack defense. The trainable implementation lives under `vista_augur/second_workpoint/`, datasets live under `datasets/`, target-model code and weights live under `target_model/`, and project documents should be written under `vista_augur/docs/` unless the user explicitly asks for a different location.
 
 ## Working Style
 
@@ -18,7 +18,7 @@ This workspace contains an Augur-related research project focused on traffic cor
 
 ## Documentation Rules
 
-- Write new project documents under `work2/docs/`.
+- Write new project documents under `vista_augur/docs/`.
 - When a document is concept-heavy, include visual aids where helpful, such as:
   - Mermaid flowcharts
   - comparison tables
@@ -72,7 +72,7 @@ This workspace contains an Augur-related research project focused on traffic cor
 
 ## Code and Experiment Guidance
 
-- Reuse the existing datasets and task setup from `Generator_Trainer/` unless the user explicitly requests new data.
+- Reuse the datasets under `datasets/` and the task setup documented under `vista_augur/docs/` unless the user explicitly requests new data.
 - Keep comparisons fair with the first work point: same datasets, same target models, same evaluation protocol when possible.
 - Prefer lightweight architectural additions before introducing heavy new modules.
 - Do not claim a module performs semantic alignment unless the mechanism actually supports that claim.
@@ -87,4 +87,4 @@ This workspace contains an Augur-related research project focused on traffic cor
 
 If the user asks for planning, explanation, or document writing in this workspace, default output location is:
 
-`work2/docs/`
+`vista_augur/docs/`

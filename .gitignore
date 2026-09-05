@@ -7,7 +7,6 @@
 .DS_Store
 .idea/
 .vscode/
-Generator_Trainer/.vscode/
 
 # Python cache and virtual environments
 **/__pycache__/
@@ -26,12 +25,15 @@ env/
 *.temp
 
 # Local datasets and heavyweight base models
-datasets/
+datasets/*
+!datasets/README.md
 base_models/
-Generator_Trainer/
+
+# Large reference documents
+*.pdf
 
 # Training outputs and checkpoints
-work2/outputs/
+vista_augur/outputs/
 
 # Generated model/data artifacts kept locally
 target_model/**/*.pth
@@ -39,4 +41,3 @@ target_model/**/*.pt
 target_model/**/*.pickle
 target_model/**/*.p
 target_model/**/*.npz
-Generator_Trainer
