@@ -2,89 +2,81 @@
 
 ## Scope
 
-This file applies to the current directory and all subdirectories beneath it.
+This file applies to the repository root and all subdirectories.
 
-## Project Context
+## Project Goal
 
-This workspace contains the second work point of an Augur-related research project focused on traffic correlation attack defense. The trainable implementation lives under `vista_augur/second_workpoint/`, datasets live under `datasets/`, target-model code and weights live under `target_model/`, and project documents should be written under `vista_augur/docs/` unless the user explicitly asks for a different location.
+This repository contains the second work point of the Augur traffic-correlation-defense project. The objective is to generate physically deployable future traffic perturbations from historical Tor traffic while reducing the effectiveness of frozen correlation-attack models.
 
-## Working Style
+Preserve continuity with the first work point: the research contribution should come from the generator representation and reprogramming mechanism, not from silently changing datasets, target models, or evaluation rules.
 
-- Preserve the Augur research context unless the user explicitly changes it.
-- When proposing or implementing a second work point, prefer continuity with the existing Augur task, datasets, and evaluation targets.
-- Keep explanations rigorous, readable, and beginner-friendly.
-- Avoid overly fragmented writing with too many tiny nested bullet points.
-- Prefer a balanced document style: short sections, summary tables, diagrams, code blocks, and explanatory prose.
+## Repository Layout
+
+| Path | Responsibility |
+| --- | --- |
+| `vista_augur/second_workpoint/` | Trainable model, data adapters, loss, and trainer |
+| `vista_augur/configs/` | Reproducible experiment configurations |
+| `vista_augur/docs/` | Technical designs, runbooks, and experiment records |
+| `datasets/` | Local DeepCorr and DeepCoFFEA datasets; ignored by Git |
+| `target_model/` | Frozen target-model code and local weights |
+| `base_models/` | Local frozen LLM backbones; ignored by Git |
+| `vista_augur/outputs/` | Checkpoints and logs; ignored by Git |
+
+Run commands from the repository root. The Python import root is `vista_augur/`.
+
+## Research Constraints
+
+- Reuse the datasets under `datasets/` unless the user explicitly requests a new dataset.
+- Keep comparisons with the first work point fair: use the same data split, target model, window settings, perturbation constraints, and evaluation protocol whenever possible.
+- The output must remain a future traffic perturbation, not a traffic classifier or anomaly score.
+- Time and size perturbations must respect non-negative, additive, and deployable physical constraints.
+- Distinguish semantic roles precisely: time-series and visual features require mapping into the LLM-compatible space; prompt text is already in language space and acts as a semantic anchor.
+- Do not claim semantic alignment unless the implemented mechanism and experiment directly support that claim.
+
+## Implementation Rules
+
+- Prefer the smallest change that cleanly satisfies the task.
+- Reuse existing modules and configuration fields before adding abstractions.
+- Do not add dependencies unless explicitly requested or technically unavoidable.
+- Keep the frozen Qwen backbone and frozen target model differentiable with respect to generator inputs.
+- Keep machine-specific paths, credentials, datasets, model weights, checkpoints, logs, caches, and PDFs out of Git.
+- Preserve unrelated user changes in a dirty worktree.
 
 ## Documentation Rules
 
 - Write new project documents under `vista_augur/docs/`.
-- When a document is concept-heavy, include visual aids where helpful, such as:
-  - Mermaid flowcharts
-  - comparison tables
-  - pseudocode blocks
-  - symbol or terminology tables
-- Do not use dense wall-of-text writing when diagrams or tables would improve readability.
-- When discussing reprogramming, distinguish clearly between:
-  - non-text modalities that must be mapped into an LLM-compatible semantic space
-  - prompt text that already lives in the language space and acts as a semantic anchor
+- Write repository files and project documentation in English. User-facing explanations may be in Chinese.
+- For translation-only tasks, use the lightest available model that can preserve technical meaning and formatting.
+- Explain technical decisions through mechanism, necessity, and experimental effect rather than feature lists.
+- Use tables, Mermaid diagrams, formulas, or pseudocode when they materially improve clarity.
+- Keep comments, docstrings, parameter descriptions, and error messages in document code examples in Chinese.
+- Maintain a precise, restrained tone and clearly separate verified results from hypotheses.
 
-## Documentation Writing Contract
+## Verification
 
-- Treat technical writing as structured reasoning rather than feature listing. Prefer a first-principles progression: identify the underlying representation bottleneck, physical constraint, or engineering limitation first; then introduce the required mechanism; then explain what capability or stability improvement follows from that mechanism.
-- Keep the page readable. Do not write in either extreme:
-  - no dense wall-of-text blocks that are visually tiring
-  - no skeletal outlines where each point contains only a few words
-- Bullets are allowed and often preferred, but each bullet must be a self-contained explanation. A good default is: one lead sentence, followed by `2-4` medium-length bullets, where each bullet explains a complete idea rather than a label.
-- Each major point should explain three layers whenever possible:
-  - what the mechanism is at the operational level
-  - why it is necessary under the task, resource, or modeling constraints
-  - how it affects stability, interpretability, deployability, or experimental fairness
-- Use explicit causal transitions between sections. Prefer bridges such as:
-  - because the first work point exposes a representation bottleneck, the second work point must introduce a new mapping mechanism
-  - based on the semantic mapping above, the next challenge is how to keep the generated output physically deployable
-  - to align the mathematical objective with engineering implementation, the training loop must be reorganized as follows
-- For concept-heavy sections, prefer this composition instead of one long paragraph:
-  - a short lead sentence explaining what question the section answers
-  - one or more substantial explanatory bullets
-  - a table, Mermaid diagram, formula block, or pseudocode block when it reduces cognitive load
-- Use visual aids proactively. When the content involves data flow, module hierarchy, decision paths, training loops, or state transitions, add Mermaid diagrams that complement the prose rather than restating it mechanically.
-- Use tables to reduce reading pressure whenever prose becomes hard to scan. Tables are especially encouraged for:
-  - symbol explanations
-  - module responsibilities
-  - dataset and metric summaries
-  - experiment group definitions
-  - ablation settings
-  - model selection tradeoffs
-- When formulas are needed in Markdown documents, prefer block LaTeX with `$$ ... $$`. Formulas must constrain the logic rather than decorate the page, and the surrounding text should explain variable meanings and the role of the equation.
-- When code or pseudocode appears inside project documents, all comments, docstrings, parameter explanations, return-value explanations, and error messages should be written in Chinese unless the user explicitly requests English.
-- For long technical documents, add navigation aids near the top when helpful, such as:
-  - a quick navigation section
-  - a short reading-path note
-  - a summary card for key choices like `3B / 7B / 14B`
-- Improve readability with restrained visual emphasis. Appropriate tools include:
-  - emoji in major headings
-  - callout blocks for labels such as `Default Plan`, `Risk Note`, `Key Conclusion`, or `Final Recommendation`
-  - light color highlighting for key judgment sentences when Markdown rendering supports it
-  - sections such as `Common Misunderstandings vs Correct Reading`, `Terminology Quick Reference`, or `Model Selection Decision Graph`
-- Visual emphasis must remain selective. Do not colorize or decorate everything. Highlight only conclusion sentences, risk boundaries, default recommendations, or easily misunderstood claims.
-- Maintain a cold, precise, non-decorative tone in technical documents. Avoid inflated adjectives. The document should feel strong because its logic is constrained, not because its wording is promotional.
+Before claiming completion, run checks proportional to the change:
 
-## Code and Experiment Guidance
+1. Confirm configuration and referenced resource paths.
+2. Run Python import and `compileall` checks.
+3. Run targeted tests or smoke checks when the required local models and hardware are available.
+4. Search for stale paths after moving or renaming files.
+5. Before committing, inspect staged files and confirm that no large binaries or credentials are included.
 
-- Reuse the datasets under `datasets/` and the task setup documented under `vista_augur/docs/` unless the user explicitly requests new data.
-- Keep comparisons fair with the first work point: same datasets, same target models, same evaluation protocol when possible.
-- Prefer lightweight architectural additions before introducing heavy new modules.
-- Do not claim a module performs semantic alignment unless the mechanism actually supports that claim.
+If end-to-end training cannot be run locally, state the missing environment or model dependency explicitly instead of claiming full runtime verification.
 
-## Editing Discipline
+## Remote Experiments
 
-- Make the smallest change that cleanly satisfies the current request.
-- Preserve user intent over stylistic preference.
-- If a file becomes hard to read, restructure it instead of merely appending more text.
+Local code may be synchronized to the experiment server and executed there. Keep local and remote directory layouts consistent, synchronize only intended files, avoid overwriting unrelated remote work, and bring back logs or summaries needed for analysis. Never store SSH passwords or other credentials in repository files.
 
-## Practical Default
+Use the following connection profile for the current experiment server:
 
-If the user asks for planning, explanation, or document writing in this workspace, default output location is:
+| Field | Value |
+| --- | --- |
+| Protocol | SSH |
+| Host | `100.79.197.115` |
+| Port | `22` |
+| User | `xilin` |
+| Remote workspace | `/home/xilin/work2` |
+| Authentication | Supply the password interactively or through an approved credential manager; never place it in commands, scripts, logs, or tracked files |
 
-`vista_augur/docs/`
+The remote workspace exists and contains the synchronized project resources. Recheck its contents before every synchronization because remote state may have changed.

@@ -63,7 +63,7 @@ class DeepCorrTorchTarget:
         for parameter in self.model.parameters():
             parameter.requires_grad = False
 
-    def forward(self, adv_flow):
+    def forward(self, adv_flow, exit_flow=None):
         flow = _prepare_deepcorr_flow_torch(
             adv_flow=adv_flow,
             expected_length=self._EXPECTED_LENGTHS[self.variant],
@@ -102,17 +102,20 @@ class DeepCoFFEATorchTarget:
         for module_parameter in list(self.anchor.parameters()) + list(self.pandn.parameters()):
             module_parameter.requires_grad = False
 
-    def forward(self, adv_flow):
+    def forward(self, adv_flow, exit_flow=None):
+        if exit_flow is None:
+            raise ValueError("DeepCoFFEA requires the paired exit flow; zero-filled exit inputs are not supported.")
         tor_input = _prepare_deepcoffea_flat_flow_torch(
             adv_flow=adv_flow,
             target_length=self.config.deepcoffea_tor_len,
             torch_module=self.torch,
             device=self.device,
         )
-        exit_input = self.torch.zeros(
-            (tor_input.shape[0], self.config.deepcoffea_exit_len * 2),
-            dtype=tor_input.dtype,
-            device=tor_input.device,
+        exit_input = _prepare_deepcoffea_flat_flow_torch(
+            adv_flow=exit_flow,
+            target_length=self.config.deepcoffea_exit_len,
+            torch_module=self.torch,
+            device=self.device,
         )
         anchor_embedding = self.anchor(tor_input)
         exit_embedding = self.pandn(exit_input)

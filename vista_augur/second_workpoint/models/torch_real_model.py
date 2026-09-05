@@ -65,34 +65,28 @@ if nn is not None:
             self.config = config
             self.patch_len = int(config.patch_len)
             self.patch_num = int(config.seq_len // config.patch_len)
-            input_dim = int(config.enc_in * config.visual_conv_channels)
+            conv_channels = int(config.visual_conv_channels)
             hidden_dim = _model_width(config)
-            self.projection = nn.Linear(input_dim, hidden_dim)
+            self.conv = nn.Sequential(
+                nn.Conv2d(1, conv_channels, kernel_size=3, padding=1),
+                nn.GELU(),
+                nn.Conv2d(conv_channels, conv_channels, kernel_size=3, padding=1),
+                nn.GELU(),
+            )
+            self.projection = nn.Linear(conv_channels, hidden_dim)
             self.norm = nn.LayerNorm(hidden_dim)
 
         def forward(self, history_seq: "torch.Tensor") -> "torch.Tensor":
             batch_size = history_seq.shape[0]
-            patch_view = history_seq.reshape(
+            image = history_seq.unsqueeze(1)
+            feature_map = self.conv(image).mean(dim=2)
+            patch_features = feature_map.reshape(
                 batch_size,
-                self.config.enc_in,
+                feature_map.shape[1],
                 self.patch_num,
                 self.patch_len,
-            ).permute(0, 2, 1, 3)
-
-            mean_feature = patch_view.mean(dim=-1)
-            std_feature = patch_view.std(dim=-1, unbiased=False)
-            max_feature = patch_view.max(dim=-1).values
-            min_feature = patch_view.min(dim=-1).values
-            stats = torch.stack([mean_feature, std_feature, max_feature, min_feature], dim=-1)
-
-            if self.config.visual_conv_channels <= stats.shape[-1]:
-                expanded = stats[:, :, :, : self.config.visual_conv_channels]
-            else:
-                repeat_factor = math.ceil(self.config.visual_conv_channels / stats.shape[-1])
-                expanded = stats.repeat(1, 1, 1, repeat_factor)[:, :, :, : self.config.visual_conv_channels]
-
-            flat_inputs = expanded.reshape(batch_size, self.patch_num, -1)
-            return self.norm(self.projection(flat_inputs))
+            ).mean(dim=-1).transpose(1, 2)
+            return self.norm(self.projection(patch_features))
 
 
     class LearnedPrototypeReprogrammingLayer(nn.Module):
@@ -255,8 +249,8 @@ if nn is not None:
             torch_module, _ = _require_torch()
             self.config = config
             self.semantic_alignment_mode = str(getattr(config, "semantic_alignment_mode", "learned_prototypes"))
-            self.temporal_adapter = TemporalPatchAdapter(config)
-            self.visual_adapter = VisualPatchAdapter(config)
+            self.temporal_adapter = TemporalPatchAdapter(config) if config.use_temporal_branch else None
+            self.visual_adapter = VisualPatchAdapter(config) if config.use_visual_branch else None
             self.backbone = FrozenQwenBackbone(config)
             if self.semantic_alignment_mode == "text_prototypes":
                 self.shared_reprogramming = TextPrototypeReprogrammingLayer(
@@ -283,13 +277,13 @@ if nn is not None:
             self.output_head = PerturbationHead(config)
             self.backbone_device = self.backbone.device
             self.trainable_device = torch_module.device(str(getattr(config, "trainable_device", self.backbone_device)))
-            for module in (
+            for module in filter(None, (
                 self.temporal_adapter,
                 self.visual_adapter,
                 self.shared_reprogramming,
                 self.width_bridge,
                 self.output_head,
-            ):
+            )):
                 module.to(self.trainable_device)
 
         def train(self, mode: bool = True):
@@ -311,8 +305,9 @@ if nn is not None:
             device = self._resolve_device()
             history_seq = history_seq.to(device=device, dtype=torch.float32)
 
-            temporal_tokens = self.temporal_adapter(history_seq)
-            visual_tokens = self.visual_adapter(history_seq)
+            empty_tokens = history_seq.new_zeros((history_seq.shape[0], 0, _model_width(self.config)))
+            temporal_tokens = self.temporal_adapter(history_seq) if self.temporal_adapter is not None else empty_tokens
+            visual_tokens = self.visual_adapter(history_seq) if self.visual_adapter is not None else empty_tokens
             prototype_state = self.shared_reprogramming.build_prototype_state(self.backbone)
             temporal_route = self.shared_reprogramming.route(temporal_tokens, prototype_state)
             visual_route = self.shared_reprogramming.route(visual_tokens, prototype_state)
@@ -322,8 +317,9 @@ if nn is not None:
 
             backbone_temporal = self.width_bridge.project_to_backbone(reprogrammed_temporal)
             backbone_visual = self.width_bridge.project_to_backbone(reprogrammed_visual)
+            effective_prompt = prompt_text if self.config.use_prompt_text else ["traffic defense"] * history_seq.shape[0]
             backbone_outputs = self.backbone(
-                prompt_text=prompt_text,
+                prompt_text=effective_prompt,
                 time_tokens=backbone_temporal,
                 visual_tokens=backbone_visual,
             )

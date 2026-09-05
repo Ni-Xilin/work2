@@ -76,6 +76,8 @@ class TargetedOverheadLoss:
         self.gamma = config.gamma
         self.time_channel_indices = config.time_channel_indices
         self.size_channel_indices = config.size_channel_indices
+        self.target_name = config.target_model.lower()
+        self.deepcoffea_margin = float(config.deepcoffea_similarity_margin)
 
     def forward(
         self,
@@ -94,7 +96,10 @@ class TargetedOverheadLoss:
                 flow_mask=flow_mask,
             )
 
-        label_loss = _binary_cross_entropy_with_logits(target_logits, target_labels)
+        if "deepcoffea" in self.target_name:
+            label_loss = float(np.maximum(np.asarray(target_logits) - self.deepcoffea_margin, 0.0).mean())
+        else:
+            label_loss = _binary_cross_entropy_with_logits(target_logits, target_labels)
         time_ratio = self._compute_ratio(original_flow, adv_flow, self.time_channel_indices, flow_mask)
         size_ratio = self._compute_ratio(original_flow, adv_flow, self.size_channel_indices, flow_mask)
         total_loss = self.beta * label_loss + self.alpha * time_ratio + self.gamma * size_ratio
@@ -113,16 +118,20 @@ class TargetedOverheadLoss:
         adv_flow,
         flow_mask=None,
     ):
+        torch_module = _import_torch()
         reference_tensor = next(
             value for value in (target_logits, original_flow, adv_flow, target_labels, flow_mask) if _is_torch_tensor(value)
         )
         logits = _coerce_torch_tensor(target_logits, reference_tensor)
-        labels = _coerce_torch_tensor(target_labels, logits)
         reference_flow = _coerce_torch_tensor(original_flow, logits)
         candidate_flow = _coerce_torch_tensor(adv_flow, logits)
         mask_tensor = None if flow_mask is None else _coerce_torch_tensor(flow_mask, logits)
 
-        label_loss = _binary_cross_entropy_with_logits_torch(logits, labels)
+        if "deepcoffea" in self.target_name:
+            label_loss = torch_module.relu(logits - self.deepcoffea_margin).mean()
+        else:
+            labels = _coerce_torch_tensor(target_labels, logits)
+            label_loss = _binary_cross_entropy_with_logits_torch(logits, labels)
         time_ratio = self._compute_ratio_torch(reference_flow, candidate_flow, self.time_channel_indices, mask_tensor)
         size_ratio = self._compute_ratio_torch(reference_flow, candidate_flow, self.size_channel_indices, mask_tensor)
         total_loss = self.beta * label_loss + self.alpha * time_ratio + self.gamma * size_ratio

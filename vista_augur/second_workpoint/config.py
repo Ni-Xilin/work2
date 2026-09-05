@@ -41,14 +41,15 @@ class ExperimentConfig:
     deepcoffea_tor_len: int = 500
     # DeepCoFFEA 中 exit 侧期望的输入序列长度。
     deepcoffea_exit_len: int = 800
-    # DeepCoFFEA 缺失 exit 输入时的补齐策略；当前只支持补零。
-    deepcoffea_missing_exit_policy: str = "zero"
+    # DeepCoFFEA similarity settings inherited from the first work point.
+    deepcoffea_similarity_margin: float = -0.5
+    deepcoffea_similarity_threshold: float = 0.2
     # backbone 加载模式；当前只支持冻结的 Hugging Face backbone。
     backbone_mode: str = "hf_frozen"
     # backbone 的 Hugging Face 仓库名，作为本地路径不可用时的后备来源。
-    backbone_model_name: str = "Qwen/Qwen2.5-3B-Instruct"
+    backbone_model_name: str = "Qwen/Qwen2.5-1.5B-Instruct"
     # backbone 的本地模型目录，推荐显式指向已下载好的基模路径。
-    backbone_model_path: str = "base_models/Qwen2.5-3B-Instruct"
+    backbone_model_path: str = "base_models/Qwen2.5-1.5B-Instruct"
     # backbone 权重加载 dtype，可控制显存和数值精度折中。
     backbone_dtype: str = "float16"
     # backbone 量化模式；none 表示不量化，4bit/8bit 用于低显存 bring-up。
@@ -157,6 +158,10 @@ class ExperimentConfig:
     reprogramming_num_prototypes: int = 32
     # 语义对齐模式：learned_prototypes 或 text_prototypes。
     semantic_alignment_mode: str = "text_prototypes"
+    # Lightweight ablation switches. At least one numeric branch must stay enabled.
+    use_temporal_branch: bool = True
+    use_visual_branch: bool = True
+    use_prompt_text: bool = True
     # 历史工程中的 LLM 层数占位字段；当前不直接决定真实 backbone 层数。
     llm_layers: int = 2
     # DeepCorr 中 tor 视角 4 行写回到完整 8 行流量时的目标行索引。
@@ -185,6 +190,16 @@ class ExperimentConfig:
     max_eval_steps: int = 0
     # 每隔多少个训练 step 打印一次日志。
     log_interval: int = 1
+    # Probability threshold used by the DeepCorr checkpoints in the first work point.
+    decision_threshold: float = 0.1
+    # Paper-aligned operating points. At least 1 / target_fpr negatives are
+    # required before an empirical estimate is statistically resolvable.
+    report_fpr_targets: list[float] = field(default_factory=lambda: [1e-3, 1e-4])
+    # Number of deterministic cross-session mismatches evaluated per positive.
+    negative_pairs_per_sample: int = 1
+    # Optional training recovery and a simple epoch-wise exponential LR decay.
+    resume_from_checkpoint: str = ""
+    learning_rate_decay: float = 1.0
     # 训练后端标识；当前真实主线固定为 torch_real。
     backend: str = "torch_real"
 
@@ -211,6 +226,8 @@ class ExperimentConfig:
             raise ValueError("当前第二工作点只支持 data_loader=real。")
         if self.target_model_mode != "torch":
             raise ValueError("当前第二工作点只支持 target_model_mode=torch。")
+        if self.adv_type not in {"time", "size", "time_and_size"}:
+            raise ValueError("adv_type must be time, size, or time_and_size.")
         if self.backbone_mode != "hf_frozen":
             raise ValueError("当前第二工作点只支持 backbone_mode=hf_frozen。")
         if self.backbone_dtype not in {"float32", "float16", "bfloat16"}:
@@ -223,8 +240,12 @@ class ExperimentConfig:
             raise ValueError("target_model_dropout must be in [0, 1).")
         if self.deepcoffea_tor_len <= 0 or self.deepcoffea_exit_len <= 0:
             raise ValueError("deepcoffea_tor_len and deepcoffea_exit_len must be positive.")
-        if self.deepcoffea_missing_exit_policy not in {"zero"}:
-            raise ValueError("deepcoffea_missing_exit_policy currently supports only zero.")
+        if not -1.0 <= self.deepcoffea_similarity_margin <= 1.0:
+            raise ValueError("deepcoffea_similarity_margin must be in [-1, 1].")
+        if not -1.0 <= self.deepcoffea_similarity_threshold <= 1.0:
+            raise ValueError("deepcoffea_similarity_threshold must be in [-1, 1].")
+        if self.deepcoffea_similarity_margin >= self.deepcoffea_similarity_threshold:
+            raise ValueError("deepcoffea_similarity_margin must be lower than the decision threshold.")
         if self.eval_split not in {"val", "test"}:
             raise ValueError("eval_split 只支持 val 或 test。")
         if self.val_samples < 0 or self.test_samples < 0:
@@ -239,10 +260,20 @@ class ExperimentConfig:
             raise ValueError("reprogramming_num_prototypes 必须大于 0。")
         if self.semantic_alignment_mode not in {"learned_prototypes", "text_prototypes"}:
             raise ValueError("semantic_alignment_mode 只支持 learned_prototypes 或 text_prototypes。")
+        if not self.use_temporal_branch and not self.use_visual_branch:
+            raise ValueError("At least one of use_temporal_branch or use_visual_branch must be enabled.")
         if self.gradient_accumulation_steps <= 0:
             raise ValueError("gradient_accumulation_steps 必须大于 0。")
         if self.backend != "torch_real":
             raise ValueError("当前第二工作点只支持 backend=torch_real。")
+        if not 0.0 < self.decision_threshold < 1.0:
+            raise ValueError("decision_threshold must be in (0, 1).")
+        if any(target <= 0.0 or target > 1.0 for target in self.report_fpr_targets):
+            raise ValueError("report_fpr_targets must contain values in (0, 1].")
+        if self.negative_pairs_per_sample <= 0:
+            raise ValueError("negative_pairs_per_sample must be positive.")
+        if not 0.0 < self.learning_rate_decay <= 1.0:
+            raise ValueError("learning_rate_decay must be in (0, 1].")
         if self.data_loader == "real" and self.data.lower() in {"deepcoffea", "deepcoffea_real"} and self.eval_split == "val":
             raise ValueError("DeepCoFFEA 当前只有 train/test session 文件，eval_split 不能设置为 val。")
         if not self.backbone_model_name and not self.backbone_model_path:
@@ -253,6 +284,8 @@ class ExperimentConfig:
             raise ValueError(f"backbone_model_path 不存在: {self.backbone_model_path}")
         if self.target_model_path and not Path(self.target_model_path).exists():
             raise ValueError(f"target_model_path 不存在: {self.target_model_path}")
+        if self.resume_from_checkpoint and not Path(self.resume_from_checkpoint).exists():
+            raise ValueError(f"resume_from_checkpoint does not exist: {self.resume_from_checkpoint}")
         self._validate_source_indices(self.tor_row_indices, "tor_row_indices", upper_bound=8)
         self._validate_channel_indices(self.time_channel_indices, "time_channel_indices")
         self._validate_channel_indices(self.size_channel_indices, "size_channel_indices")

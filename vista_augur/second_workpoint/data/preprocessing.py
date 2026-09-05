@@ -16,18 +16,6 @@ if TYPE_CHECKING:
 
 
 DEEP_CORR_TOR_ROWS = (0, 3, 4, 7)
-PROMPT_FEATURE_ORDER = (
-    "nonzero_rate",
-    "time_mean",
-    "time_cv",
-    "size_mean_abs",
-    "size_cv",
-    "burst_ratio",
-    "trend_ratio",
-    "dir_balance",
-)
-
-
 def pad_or_truncate_1d(values: np.ndarray | list[float], target_length: int) -> np.ndarray:
     """把一维序列裁剪或补零到固定长度。"""
 
@@ -95,58 +83,6 @@ def iter_window_starts(
     # 在最后一个完整 future 窗口之后，再补一个“history 完整、future 可能不足”的窗口。
     max_tail_index = remaining // stride + 1
     return [window_index * stride for window_index in range(max_tail_index + 1)]
-
-
-def build_temporal_view(history_seq: np.ndarray, patch_len: int) -> np.ndarray:
-    """把历史窗口整理成 patch 级时序视图。"""
-
-    channels, seq_len = history_seq.shape
-    if seq_len % patch_len != 0:
-        raise ValueError("history_seq 的长度必须能被 patch_len 整除。")
-
-    patch_num = seq_len // patch_len
-    patch_view = history_seq.reshape(channels, patch_num, patch_len).transpose(1, 0, 2)
-    return patch_view.reshape(patch_num, channels * patch_len).astype(np.float32)
-
-
-def build_visual_view(history_seq: np.ndarray, patch_len: int) -> np.ndarray:
-    """把历史窗口整理成轻量视觉化结构视图。
-
-    每个 patch、每个通道抽取 6 个统计量：
-    mean / std / max / min / grad_energy / density_mean。"""
-
-    channels, seq_len = history_seq.shape
-    if seq_len % patch_len != 0:
-        raise ValueError("history_seq 的长度必须能被 patch_len 整除。")
-
-    patch_num = seq_len // patch_len
-    patch_view = history_seq.reshape(channels, patch_num, patch_len).transpose(1, 0, 2)
-
-    mean_feature = patch_view.mean(axis=-1)
-    std_feature = patch_view.std(axis=-1)
-    max_feature = patch_view.max(axis=-1)
-    min_feature = patch_view.min(axis=-1)
-
-    if patch_len > 1:
-        gradients = np.diff(patch_view, axis=-1)
-        grad_energy = np.mean(np.abs(gradients), axis=-1)
-    else:
-        grad_energy = np.zeros((patch_num, channels), dtype=np.float32)
-
-    density_mean = np.mean(np.abs(patch_view) > 1e-6, axis=-1).astype(np.float32)
-
-    descriptor = np.stack(
-        [
-            mean_feature,
-            std_feature,
-            max_feature,
-            min_feature,
-            grad_energy,
-            density_mean,
-        ],
-        axis=-1,
-    )
-    return descriptor.reshape(patch_num, channels * 6).astype(np.float32)
 
 
 def compute_prompt_features(
@@ -238,10 +174,6 @@ def build_sample_views(
         pred_len=config.pred_len,
         patch_len=config.patch_len,
     )
-    prompt_feature_vector = np.asarray(
-        [prompt_features[name] for name in PROMPT_FEATURE_ORDER],
-        dtype=np.float32,
-    )
     future_mask = np.zeros((config.pred_len,), dtype=np.float32)
     future_mask[:future_valid_length] = 1.0
 
@@ -249,10 +181,7 @@ def build_sample_views(
         "full_flow": full_flow.astype(np.float32),
         "history_seq": history_seq.astype(np.float32),
         "clean_future": clean_future.T.astype(np.float32),
-        "x_ts": build_temporal_view(history_seq, config.patch_len),
-        "x_vis": build_visual_view(history_seq, config.patch_len),
         "prompt_text": prompt_text,
-        "prompt_features": prompt_feature_vector,
         "future_mask": future_mask,
         "window_meta": np.asarray(
             [sample_index, window_index, window_start, raw_length, future_valid_length],

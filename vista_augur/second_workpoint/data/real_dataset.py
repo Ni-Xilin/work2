@@ -18,6 +18,9 @@ from second_workpoint.data.preprocessing import (
 )
 
 
+_DEEP_CORR_SAMPLE_CACHE: dict[str, list[dict]] = {}
+
+
 DEEP_CORR_RUN_NAMES = (
     "8872",
     "8802",
@@ -41,44 +44,72 @@ class DeepCorrRealDataset:
     def __init__(self, config: ExperimentConfig, split: str) -> None:
         self.config = config
         self.split = _normalize_split(config, split)
-        self.dataset_name = "mDeepCorr" if config.data.lower() == "mdeepcorr" else "Deepcorr300"
+        self.dataset_name = str(config.data)
         self.data_dir = Path(config.data_path)
         self.raw_samples = self._load_raw_samples()
         self.sample_indices = self._resolve_split_indices()
-        self.window_specs = self._build_window_specs()
+        self.negative_sample_indices = _build_negative_index_map(
+            self.sample_indices,
+            config.negative_pairs_per_sample,
+        )
+        self.window_starts = self._build_window_starts()
 
     def __len__(self) -> int:
-        return int(self.window_specs.shape[0])
+        return int(self.sample_indices.shape[0])
 
     def __getitem__(self, index: int) -> dict[str, np.ndarray]:
-        sample_index, window_index, start = self.window_specs[int(index)].tolist()
+        sample_index = int(self.sample_indices[int(index)])
         raw_sample = self.raw_samples[int(sample_index)]
         full_flow_8 = build_deepcorr_full_flow(raw_sample, self.config.flow_size)
         tor_flow = full_flow_8[np.asarray(self.config.tor_row_indices, dtype=np.int64)]
 
-        history_seq = tor_flow[:, start : start + self.config.seq_len].copy()
-        future_start = start + self.config.seq_len
-        future_end = future_start + self.config.pred_len
-        clean_future = tor_flow[:, future_start:future_end].copy()
+        windows = []
+        for window_index, start in enumerate(self.window_starts):
+            history_seq = tor_flow[:, start : start + self.config.seq_len].copy()
+            future_start = start + self.config.seq_len
+            future_end = future_start + self.config.pred_len
+            clean_future = tor_flow[:, future_start:future_end].copy()
+            windows.append(
+                build_sample_views(
+                    config=self.config,
+                    dataset_name=self.dataset_name,
+                    history_seq=history_seq,
+                    clean_future=clean_future,
+                    full_flow=tor_flow,
+                    sample_index=int(sample_index),
+                    window_index=int(window_index),
+                    window_start=int(start),
+                    writeback_start=int(future_start),
+                    raw_length=self.config.flow_size,
+                    future_valid_length=self.config.pred_len,
+                )
+            )
 
-        sample = build_sample_views(
-            config=self.config,
-            dataset_name=self.dataset_name,
-            history_seq=history_seq,
-            clean_future=clean_future,
-            full_flow=tor_flow,
-            sample_index=int(sample_index),
-            window_index=int(window_index),
-            window_start=int(start),
-            writeback_start=int(future_start),
-            raw_length=self.config.flow_size,
-            future_valid_length=self.config.pred_len,
-        )
+        sample = {
+            "full_flow": tor_flow.astype(np.float32),
+            "history_seq": np.stack([window["history_seq"] for window in windows], axis=0),
+            "clean_future": np.stack([window["clean_future"] for window in windows], axis=0),
+            "prompt_text": [str(window["prompt_text"]) for window in windows],
+            "future_mask": np.stack([window["future_mask"] for window in windows], axis=0),
+            "window_meta": np.stack([window["window_meta"] for window in windows], axis=0),
+            "writeback_meta": np.stack([window["writeback_meta"] for window in windows], axis=0),
+        }
         sample["target_full_flow"] = full_flow_8.astype(np.float32)
-        sample["sample_key"] = f"{self.dataset_name}:{sample_index}:{window_index}"
+        exit_rows = [index for index in range(full_flow_8.shape[0]) if index not in self.config.tor_row_indices]
+        mismatched_flows = []
+        for negative_index in self.negative_sample_indices[int(sample_index)]:
+            negative_flow = build_deepcorr_full_flow(self.raw_samples[negative_index], self.config.flow_size)
+            mismatched_flow = full_flow_8.copy()
+            mismatched_flow[exit_rows] = negative_flow[exit_rows]
+            mismatched_flows.append(mismatched_flow.astype(np.float32))
+        sample["target_negative_flow"] = np.stack(mismatched_flows, axis=0)
+        sample["sample_key"] = f"{self.dataset_name}:{sample_index}"
         return sample
 
     def _load_raw_samples(self) -> list[dict]:
+        cache_key = str(self.data_dir.resolve())
+        if cache_key in _DEEP_CORR_SAMPLE_CACHE:
+            return _DEEP_CORR_SAMPLE_CACHE[cache_key]
         samples: list[dict] = []
         for run_name in DEEP_CORR_RUN_NAMES:
             file_path = self.data_dir / f"{run_name}_tordata300.pickle"
@@ -88,6 +119,7 @@ class DeepCorrRealDataset:
                 samples.extend(pickle.load(file))
         if not samples:
             raise ValueError("DeepCorr 数据集为空，无法构造 dataloader。")
+        _DEEP_CORR_SAMPLE_CACHE[cache_key] = samples
         return samples
 
     def _resolve_split_indices(self) -> np.ndarray:
@@ -124,7 +156,7 @@ class DeepCorrRealDataset:
             indices = indices[:limit]
         return indices.astype(np.int64)
 
-    def _build_window_specs(self) -> np.ndarray:
+    def _build_window_starts(self) -> list[int]:
         starts = iter_window_starts(
             total_length=self.config.flow_size,
             seq_len=self.config.seq_len,
@@ -134,14 +166,7 @@ class DeepCorrRealDataset:
         )
         if not starts:
             raise ValueError("DeepCorr 数据窗口参数非法，无法切出任何样本。")
-
-        specs: list[tuple[int, int, int]] = []
-        for sample_index in self.sample_indices.tolist():
-            for window_index, start in enumerate(starts):
-                specs.append((int(sample_index), int(window_index), int(start)))
-        if not specs:
-            raise ValueError("DeepCorr 数据切分后没有可用窗口。")
-        return np.asarray(specs, dtype=np.int64)
+        return starts
 
 
 class DeepCoffeaRealDataset:
@@ -170,6 +195,10 @@ class DeepCoffeaRealDataset:
             self.session_data["tor_ipds"][int(session_index)],
             self.session_data["tor_sizes"][int(session_index)],
         )
+        exit_session = build_deepcoffea_session(
+            self.session_data["exit_ipds"][int(session_index)],
+            self.session_data["exit_sizes"][int(session_index)],
+        )
         raw_length = int(session.shape[1])
         history_seq = session[:, start : start + self.config.seq_len].copy()
 
@@ -195,6 +224,32 @@ class DeepCoffeaRealDataset:
             future_valid_length=future_valid_length,
         )
         sample["label_text"] = str(self.session_data["labels"][int(session_index)])
+        sample["target_full_flow"] = _fixed_session_window(
+            session,
+            start=start,
+            target_length=self.config.deepcoffea_tor_len,
+        )
+        sample["target_exit_flow"] = _fixed_session_window(
+            exit_session,
+            start=start,
+            target_length=self.config.deepcoffea_exit_len,
+        )
+        negative_exit_windows = []
+        session_count = len(self.session_data["labels"])
+        for offset in range(1, self.config.negative_pairs_per_sample + 1):
+            negative_session_index = (int(session_index) + offset) % session_count
+            negative_exit_session = build_deepcoffea_session(
+                self.session_data["exit_ipds"][negative_session_index],
+                self.session_data["exit_sizes"][negative_session_index],
+            )
+            negative_exit_windows.append(
+                _fixed_session_window(
+                    negative_exit_session,
+                    start=start,
+                    target_length=self.config.deepcoffea_exit_len,
+                )
+            )
+        sample["target_negative_exit_flow"] = np.stack(negative_exit_windows, axis=0)
         sample["sample_key"] = f"{self.dataset_name}:{session_index}:{window_index}"
         sample["session_length"] = np.asarray(raw_length, dtype=np.int64)
         return sample
@@ -204,13 +259,15 @@ class DeepCoffeaRealDataset:
         if not session_path.exists():
             raise FileNotFoundError(f"未找到 DeepCoFFEA session 文件: {session_path}")
         payload = np.load(session_path, allow_pickle=True)
-        required_keys = {"tor_ipds", "tor_sizes", "labels"}
+        required_keys = {"tor_ipds", "tor_sizes", "exit_ipds", "exit_sizes", "labels"}
         missing = required_keys.difference(payload.files)
         if missing:
             raise KeyError(f"DeepCoFFEA session 文件缺少字段: {sorted(missing)}")
         return {
             "tor_ipds": payload["tor_ipds"],
             "tor_sizes": payload["tor_sizes"],
+            "exit_ipds": payload["exit_ipds"],
+            "exit_sizes": payload["exit_sizes"],
             "labels": payload["labels"],
         }
 
@@ -242,6 +299,29 @@ class DeepCoffeaRealDataset:
         if limit > 0:
             window_specs = window_specs[:limit]
         return window_specs
+
+
+def _fixed_session_window(session: np.ndarray, start: int, target_length: int) -> np.ndarray:
+    """Extract one target-model window and zero-pad only beyond the real session tail."""
+
+    window = np.zeros((session.shape[0], target_length), dtype=np.float32)
+    source = session[:, start : start + target_length]
+    window[:, : source.shape[1]] = source
+    return window
+
+
+def _build_negative_index_map(indices: np.ndarray, negative_count: int) -> dict[int, list[int]]:
+    """Map every split member to later split members for deterministic mismatching."""
+
+    values = [int(index) for index in indices.tolist()]
+    if not values:
+        return {}
+    if len(values) == 1:
+        return {values[0]: [values[0]] * negative_count}
+    return {
+        value: [values[(position + offset) % len(values)] for offset in range(1, negative_count + 1)]
+        for position, value in enumerate(values)
+    }
 
 
 def _normalize_split(config: ExperimentConfig, split: str) -> str:

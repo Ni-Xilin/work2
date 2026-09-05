@@ -1,0 +1,76 @@
+# VISTA-Augur 第二工作点
+
+本仓库包含 Augur 流量关联攻击防御项目的第二工作点。在保持第一工作点数据集、攻击目标、物理扰动约束和评测协议可对比的前提下，使用基于冻结 Qwen 的轻量多模态重编程模型替换原有扰动生成器。
+
+## 核心实现
+
+- `vista_augur/second_workpoint/`：数据、模型、损失函数、评估与训练代码。
+- `vista_augur/configs/`：smoke、完整实验和消融实验配置。
+- `datasets/`：本地 DeepCorr 与 DeepCoFFEA 数据，Git 不跟踪。
+- `target_model/`：冻结攻击模型实现及其本地 checkpoint。
+- `base_models/`：本地 Hugging Face 基模快照，Git 不跟踪。
+- `vista_augur/outputs/`：训练 checkpoint 与日志，Git 不跟踪。
+
+主实验目标为 DeepCorr300；m-DeepCorr 与 DeepCoFFEA 配置用于后续跨攻击模型验证。
+
+对于 DeepCorr300 和 m-DeepCorr，每个数据集样本代表一条完整流量。模型会先同时生成该流全部历史窗口对应的未来扰动，再将其全部写回完整流量，最后由冻结攻击模型给出训练反馈。DeepCoFFEA 因不同会话的窗口数不同，保留按窗口在线处理的主线。
+
+## 环境配置
+
+推荐 Python 3.10 或 3.11。在仓库根目录执行：
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+默认骨干模型为 `Qwen/Qwen2.5-1.5B-Instruct`，FP16 下可放入一张 RTX 4090。实验配置使用可迁移的相对路径 `base_models/Qwen2.5-1.5B-Instruct`。请在可联网机器下载快照，再将该 Git 忽略目录复制到离线实验服务器。
+
+```bash
+huggingface-cli download Qwen/Qwen2.5-1.5B-Instruct \
+  --local-dir base_models/Qwen2.5-1.5B-Instruct
+```
+
+## 验证与运行
+
+```bash
+PYTHONPATH=vista_augur python -m unittest discover -s vista_augur/tests -v
+PYTHONPATH=vista_augur python vista_augur/run_train.py \
+  --config vista_augur/configs/second_workpoint_deepcorr300_torch_real_smoke.json
+```
+
+运行完整 DeepCorr300 实验：
+
+```bash
+PYTHONPATH=vista_augur python vista_augur/run_train.py \
+  --config vista_augur/configs/second_workpoint_deepcorr300_torch_real_full_text_prototypes.json
+```
+
+无需修改 JSON 即可恢复训练或评估已保存的生成器：
+
+```bash
+PYTHONPATH=vista_augur python vista_augur/run_train.py \
+  --config vista_augur/configs/second_workpoint_deepcorr300_torch_real_full_text_prototypes.json \
+  --resume vista_augur/outputs/checkpoints/<run>/best.pt
+
+PYTHONPATH=vista_augur python vista_augur/run_train.py \
+  --config vista_augur/configs/second_workpoint_deepcorr300_torch_real_full_text_prototypes.json \
+  --resume vista_augur/outputs/checkpoints/<run>/best.pt \
+  --evaluate
+```
+
+## 指标术语
+
+- `original_positive_rate` 与 `adv_positive_rate`：匹配流量对的检测率。
+- `attack_success_rate`：原先被检测为匹配、加入扰动后变为未匹配的样本比例。
+- `clean_*` 与 `adv_*` 的 Precision、Recall、F1、FPR：以真实匹配对作为正样本、确定性的跨会话错配作为负样本。
+- `operating_points`：从干净负样本分数中校准论文使用的 `1e-3`、`1e-4` FPR 阈值。分别至少需要 1,000 与 10,000 个负样本后，`resolvable` 才会为真。
+- DeepCorr 使用第一工作点的概率阈值 `0.1`。
+- DeepCoFFEA 使用真实配对会话中的 500 包 Tor 窗口与 800 包 Exit 窗口，并使用余弦 margin hinge 损失；不会再用全零 Exit 输入替代真实流量。
+
+## 参考资料
+
+- 第一工作点源码：<https://github.com/Ni-Xilin/Augur>
+- 本地第一工作点论文：`第一个工作点论文/`
