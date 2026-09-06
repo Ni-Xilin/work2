@@ -35,6 +35,8 @@ cd /home/xilin/work2
 
 恢复训练将 `resume_from_checkpoint` 改为 `latest`。正式评估将 `run_mode` 改为 `evaluate`，并将 `resume_from_checkpoint` 改为 `best`。
 
+每个 epoch 的完整 checkpoint 使用 `generator_epNNN_origrecX_advrecX_lossX_timeX_sizeX.pt` 命名；`latest.pt` 和 `best.pt` 仍作为稳定的恢复入口。其中 `origrec` 与 `advrec` 是训练期正样本验证 Recall，不是 Precision 或整体 Accuracy。
+
 ## 扩展配置
 
 m-DeepCorr 和 DeepCoFFEA 配置可以通过同一个启动器显式运行：

@@ -399,7 +399,7 @@ class TorchTrainer:
         )
 
     def _save_checkpoint(self, epoch: int, train_summary: dict, eval_summary: dict, is_best: bool) -> None:
-        checkpoint_prefix = self.run_dir / f"checkpoint_epoch_{epoch}"
+        checkpoint_prefix = self.run_dir / self._checkpoint_stem(epoch, eval_summary)
         save_json(
             checkpoint_prefix.with_suffix(".json"),
             {
@@ -424,6 +424,19 @@ class TorchTrainer:
         self.torch.save(payload, self.run_dir / "latest.pt")
         if is_best:
             self.torch.save(payload, self.run_dir / "best.pt")
+
+    @staticmethod
+    def _checkpoint_stem(epoch: int, eval_summary: dict) -> str:
+        """生成类似 Work1 但指标语义更准确的 checkpoint 名称。"""
+
+        return (
+            f"generator_ep{epoch:03d}"
+            f"_origrec{float(eval_summary['original_positive_rate']):.3f}"
+            f"_advrec{float(eval_summary['adv_positive_rate']):.3f}"
+            f"_loss{float(eval_summary['loss']):.4f}"
+            f"_time{float(eval_summary['time_ratio']):.3f}"
+            f"_size{float(eval_summary['size_ratio']):.3f}"
+        )
 
     def _load_checkpoint(self, checkpoint_path: Path) -> None:
         checkpoint = self.torch.load(checkpoint_path, map_location=self.trainable_device)
