@@ -38,7 +38,7 @@ Work2 训练主线已实现并可运行：它使用真实数据、冻结的本�
 | JSON 配置校验 | 当前全部 Work2 配置通过 |
 | Python 编译检查 | 通过 |
 | 本地单元测试 | 通过；依赖 PyTorch 的测试在本地跳过 |
-| 远程单元测试 | `/home/xilin/anaconda3/envs/deepcorr` 中 15/15 通过 |
+| 远程单元测试 | 该记录对应旧版基线；Work1 协议对齐后需重新执行 |
 | 按流分组写回梯度测试 | 远程 CPU 通过 |
 | 冻结 Qwen 加载 | 本地 2.9GB 快照加载通过 |
 | DeepCorr300 主线 smoke | 两张 GPU 上通过 |

@@ -36,6 +36,11 @@ class ExperimentConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "negative_pairs_per_sample"):
             config.validate()
 
+    def test_rejects_nonpositive_negative_evaluation_batch(self):
+        config = self.make_config(evaluation_negative_batch_size=0)
+        with self.assertRaisesRegex(ValueError, "evaluation_negative_batch_size"):
+            config.validate()
+
 
 if __name__ == "__main__":
     unittest.main()

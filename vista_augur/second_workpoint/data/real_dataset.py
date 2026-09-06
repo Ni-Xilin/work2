@@ -48,9 +48,14 @@ class DeepCorrRealDataset:
         self.data_dir = Path(config.data_path)
         self.raw_samples = self._load_raw_samples()
         self.sample_indices = self._resolve_split_indices()
-        self.negative_sample_indices = _build_negative_index_map(
-            self.sample_indices,
-            config.negative_pairs_per_sample,
+        self.negative_sample_indices = (
+            _build_negative_index_map(
+                self.sample_indices,
+                config.negative_pairs_per_sample,
+                split_seed=config.split_seed,
+            )
+            if self.split == "test"
+            else {}
         )
         self.window_starts = self._build_window_starts()
 
@@ -96,13 +101,14 @@ class DeepCorrRealDataset:
         }
         sample["target_full_flow"] = full_flow_8.astype(np.float32)
         exit_rows = [index for index in range(full_flow_8.shape[0]) if index not in self.config.tor_row_indices]
-        mismatched_flows = []
-        for negative_index in self.negative_sample_indices[int(sample_index)]:
-            negative_flow = build_deepcorr_full_flow(self.raw_samples[negative_index], self.config.flow_size)
-            mismatched_flow = full_flow_8.copy()
-            mismatched_flow[exit_rows] = negative_flow[exit_rows]
-            mismatched_flows.append(mismatched_flow.astype(np.float32))
-        sample["target_negative_flow"] = np.stack(mismatched_flows, axis=0)
+        if self.split == "test":
+            mismatched_flows = []
+            for negative_index in self.negative_sample_indices[int(sample_index)]:
+                negative_flow = build_deepcorr_full_flow(self.raw_samples[negative_index], self.config.flow_size)
+                mismatched_flow = full_flow_8.copy()
+                mismatched_flow[exit_rows] = negative_flow[exit_rows]
+                mismatched_flows.append(mismatched_flow.astype(np.float32))
+            sample["target_negative_flow"] = np.stack(mismatched_flows, axis=0)
         sample["sample_key"] = f"{self.dataset_name}:{sample_index}"
         return sample
 
@@ -134,10 +140,14 @@ class DeepCorrRealDataset:
                 else:
                     held_out = set(int(index) for index in val_indices)
                     held_out.update(int(index) for index in test_indices)
-                    indices = np.asarray(
+                    remaining_indices = np.asarray(
                         [index for index in range(len(self.raw_samples)) if index not in held_out],
                         dtype=np.int64,
                     )
+                    rng = np.random.RandomState(self.config.split_seed)
+                    rng.shuffle(remaining_indices)
+                    unused = min(self.config.deepcorr_unused_samples, max(0, remaining_indices.size - 1))
+                    indices = remaining_indices[: remaining_indices.size - unused] if unused else remaining_indices
             elif self.split == "val":
                 indices = np.asarray(val_indices, dtype=np.int64)
             else:
@@ -149,6 +159,7 @@ class DeepCorrRealDataset:
                 split_seed=self.config.split_seed,
                 val_size=self.config.val_samples,
                 test_size=self.config.test_samples,
+                unused_size=self.config.deepcorr_unused_samples,
             )
 
         limit = self.config.max_train_samples if self.split == "train" else self.config.max_eval_samples
@@ -310,18 +321,28 @@ def _fixed_session_window(session: np.ndarray, start: int, target_length: int) -
     return window
 
 
-def _build_negative_index_map(indices: np.ndarray, negative_count: int) -> dict[int, list[int]]:
-    """Map every split member to later split members for deterministic mismatching."""
+def _build_negative_index_map(
+    indices: np.ndarray,
+    negative_count: int,
+    split_seed: int = 2025,
+) -> dict[int, list[int]]:
+    """Reproduce Work1's seeded shuffle-and-take mismatch construction."""
 
     values = [int(index) for index in indices.tolist()]
     if not values:
         return {}
-    if len(values) == 1:
-        return {values[0]: [values[0]] * negative_count}
-    return {
-        value: [values[(position + offset) % len(values)] for offset in range(1, negative_count + 1)]
-        for position, value in enumerate(values)
-    }
+    if negative_count > len(values) - 1:
+        raise ValueError(
+            "negative_pairs_per_sample must be smaller than the number of test samples "
+            "so every Work1-style mismatch is distinct."
+        )
+    rng = np.random.RandomState(split_seed)
+    shuffled = values.copy()
+    mapping: dict[int, list[int]] = {}
+    for value in values:
+        rng.shuffle(shuffled)
+        mapping[value] = [candidate for candidate in shuffled if candidate != value][:negative_count]
+    return mapping
 
 
 def _normalize_split(config: ExperimentConfig, split: str) -> str:
@@ -350,19 +371,25 @@ def _build_deterministic_split(
     split_seed: int,
     val_size: int,
     test_size: int,
+    unused_size: int = 0,
 ) -> np.ndarray:
-    """在没有缓存索引时，用稳定随机种子构造切分。"""
+    """Reproduce Work1's train/val/test/unused split with a stable seed."""
 
-    rng = np.random.default_rng(split_seed)
-    permutation = rng.permutation(total_size)
+    rng = np.random.RandomState(split_seed)
+    permutation = np.arange(total_size, dtype=np.int64)
+    rng.shuffle(permutation)
 
     effective_val = min(max(0, val_size), total_size)
     remaining = max(0, total_size - effective_val)
     effective_test = min(max(0, test_size), remaining)
+    remaining = max(0, remaining - effective_test)
+    effective_unused = min(max(0, unused_size), remaining)
+    train_end = total_size - effective_val - effective_test - effective_unused
 
-    val_indices = permutation[:effective_val]
-    test_indices = permutation[effective_val : effective_val + effective_test]
-    train_indices = permutation[effective_val + effective_test :]
+    train_indices = permutation[:train_end]
+    val_indices = permutation[train_end : train_end + effective_val]
+    test_start = train_end + effective_val
+    test_indices = permutation[test_start : test_start + effective_test]
 
     if split == "train":
         return train_indices.astype(np.int64)

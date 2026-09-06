@@ -48,6 +48,10 @@ PYTHONPATH=vista_augur python vista_augur/run_train.py \
   --config vista_augur/configs/second_workpoint_deepcorr300_torch_real_full_text_prototypes.json
 ```
 
+该配置对齐第一工作点的训练协议：`batch_size=16`、训练期 `drop_last=true`、20 epoch、学习率 `0.01`、每轮乘 `0.8`，损失权重为 `beta/alpha/gamma=1/3/0.9`。训练期间只使用匹配正样本；独立测试保留全部样本，并为每个正样本构造 199 个负样本。
+
+调参时复制该 JSON 并修改 `model_id`，避免覆盖已有 checkpoint。通常只调整 `learning_rate`、`learning_rate_decay`、`beta`、`alpha`、`gamma`、`batch_size`、`train_epochs` 和 `patience`；数据划分及评估字段不应改动。
+
 无需修改 JSON 即可恢复训练或评估已保存的生成器：
 
 ```bash
@@ -61,12 +65,14 @@ PYTHONPATH=vista_augur python vista_augur/run_train.py \
   --evaluate
 ```
 
+`--evaluate` 默认使用 `final_eval_split=test`，并在 `10^-3`、`10^-4` FPR 下分别为 clean 和 adversarial 分数校准阈值。需要诊断验证集时可显式添加 `--eval-split val`。
+
 ## 指标术语
 
 - `original_positive_rate` 与 `adv_positive_rate`：匹配流量对的检测率。
 - `attack_success_rate`：原先被检测为匹配、加入扰动后变为未匹配的样本比例。
 - `clean_*` 与 `adv_*` 的 Precision、Recall、F1、FPR：以真实匹配对作为正样本、确定性的跨会话错配作为负样本。
-- `operating_points`：从干净负样本分数中校准论文使用的 `1e-3`、`1e-4` FPR 阈值。分别至少需要 1,000 与 10,000 个负样本后，`resolvable` 才会为真。
+- `operating_points`：分别从 clean 和 adversarial 负样本分数中校准论文使用的 `1e-3`、`1e-4` FPR 阈值。正式 DeepCorr 测试使用 1,000 个正样本和每个正样本 199 个负样本。
 - DeepCorr 使用第一工作点的概率阈值 `0.1`。
 - DeepCoFFEA 使用真实配对会话中的 500 包 Tor 窗口与 800 包 Exit 窗口，并使用余弦 margin hinge 损失；不会再用全零 Exit 输入替代真实流量。
 

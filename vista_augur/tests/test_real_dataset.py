@@ -8,7 +8,13 @@ from pathlib import Path
 import numpy as np
 
 from second_workpoint.config import ExperimentConfig
-from second_workpoint.data.real_dataset import DEEP_CORR_RUN_NAMES, DeepCoffeaRealDataset, DeepCorrRealDataset
+from second_workpoint.data.real_dataset import (
+    DEEP_CORR_RUN_NAMES,
+    DeepCoffeaRealDataset,
+    DeepCorrRealDataset,
+    _build_deterministic_split,
+    _build_negative_index_map,
+)
 
 
 class DeepCoffeaDatasetTests(unittest.TestCase):
@@ -85,7 +91,9 @@ class DeepCorrDatasetTests(unittest.TestCase):
                 data_path=directory,
                 use_cached_indices=False,
                 val_samples=1,
-                test_samples=0,
+                test_samples=2,
+                deepcorr_unused_samples=1,
+                eval_split="test",
                 flow_size=300,
                 seq_len=96,
                 pred_len=48,
@@ -101,6 +109,36 @@ class DeepCorrDatasetTests(unittest.TestCase):
             self.assertEqual(sample["writeback_meta"].tolist(), [[96, 48], [144, 48], [192, 48], [240, 48]])
             self.assertEqual(sample["target_full_flow"].shape, (8, 300))
             self.assertEqual(sample["target_negative_flow"].shape, (1, 8, 300))
+
+    def test_work1_split_reserves_unused_samples(self):
+        values = {
+            split: _build_deterministic_split(
+                total_size=20,
+                split=split,
+                split_seed=2025,
+                val_size=3,
+                test_size=4,
+                unused_size=5,
+            )
+            for split in ("train", "val", "test")
+        }
+        self.assertEqual(len(values["train"]), 8)
+        self.assertEqual(len(values["val"]), 3)
+        self.assertEqual(len(values["test"]), 4)
+        self.assertTrue(set(values["train"]).isdisjoint(values["val"]))
+        self.assertTrue(set(values["train"]).isdisjoint(values["test"]))
+        self.assertTrue(set(values["val"]).isdisjoint(values["test"]))
+
+    def test_work1_negative_pairs_are_deterministic_distinct_mismatches(self):
+        indices = np.arange(1000, dtype=np.int64)
+        first = _build_negative_index_map(indices, negative_count=199, split_seed=2025)
+        second = _build_negative_index_map(indices, negative_count=199, split_seed=2025)
+
+        self.assertEqual(first, second)
+        for positive_index, negative_indices in first.items():
+            self.assertEqual(len(negative_indices), 199)
+            self.assertEqual(len(set(negative_indices)), 199)
+            self.assertNotIn(positive_index, negative_indices)
 
 
 if __name__ == "__main__":

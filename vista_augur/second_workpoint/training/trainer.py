@@ -48,7 +48,7 @@ class TorchTrainer:
                 shuffle=True,
                 num_workers=config.num_workers,
                 collate_fn=self._torch_collate_batch,
-                drop_last=False,
+                drop_last=config.training_drop_last,
             )
         self.eval_loader = DataLoader(
             self.eval_dataset,
@@ -56,7 +56,7 @@ class TorchTrainer:
             shuffle=False,
             num_workers=config.num_workers,
             collate_fn=self._torch_collate_batch,
-            drop_last=False,
+            drop_last=bool(config.is_training and config.training_drop_last),
         )
 
         self.model = SecondWorkpointTorchRealModel(config)
@@ -130,7 +130,9 @@ class TorchTrainer:
                     break
 
             train_summary = self._finalize_metrics(epoch_metrics)
-            eval_summary = self.evaluate()
+            # Work1 validates generator efficacy on matched positive pairs only.
+            # Negative-pair FPR calibration is reserved for standalone test evaluation.
+            eval_summary = self.evaluate(include_negatives=False)
             history.append({"epoch": epoch, "train": train_summary, "eval": eval_summary})
             print(
                 f"[epoch] {epoch} "
@@ -171,7 +173,7 @@ class TorchTrainer:
         save_json(self.run_dir / "train_summary.json", summary)
         return summary
 
-    def evaluate(self) -> dict:
+    def evaluate(self, include_negatives: bool = True) -> dict:
         self.model.eval()
         metrics = self._empty_metric_totals()
         score_buffers = {
@@ -183,7 +185,7 @@ class TorchTrainer:
         steps = 0
         with self.torch.no_grad():
             for step, batch in enumerate(self.eval_loader, start=1):
-                outputs = self._forward_batch(batch, log_shapes=False, include_negatives=True)
+                outputs = self._forward_batch(batch, log_shapes=False, include_negatives=include_negatives)
                 self._accumulate_metrics(metrics, outputs)
                 for name in score_buffers:
                     score_buffers[name].extend(outputs.get(name, []))
@@ -614,14 +616,14 @@ class TorchTrainer:
             negative_count = negative_exit_flow.shape[1]
             repeated_original = target_original_flow[:, None].expand(-1, negative_count, -1, -1)
             repeated_adv = target_adv_flow[:, None].expand(-1, negative_count, -1, -1)
-            negative_original_logits = self.target_model.forward(
+            negative_original_logits = self._target_forward_in_chunks(
                 repeated_original.reshape(-1, *target_original_flow.shape[1:]),
                 exit_flow=negative_exit_flow.reshape(-1, *negative_exit_flow.shape[2:]),
-            ).to(self.trainable_device)
-            negative_adv_logits = self.target_model.forward(
+            )
+            negative_adv_logits = self._target_forward_in_chunks(
                 repeated_adv.reshape(-1, *target_adv_flow.shape[1:]),
                 exit_flow=negative_exit_flow.reshape(-1, *negative_exit_flow.shape[2:]),
-            ).to(self.trainable_device)
+            )
         else:
             negative_original_flow = target_negative_flow
             negative_adv_flow = target_negative_adv_flow
@@ -645,12 +647,12 @@ class TorchTrainer:
                 )
                 negative_original_flow = negative_original_flow.unsqueeze(1)
                 negative_adv_flow = negative_adv_flow.unsqueeze(1)
-            negative_original_logits = self.target_model.forward(
+            negative_original_logits = self._target_forward_in_chunks(
                 negative_original_flow.reshape(-1, *negative_original_flow.shape[2:])
-            ).to(self.trainable_device)
-            negative_adv_logits = self.target_model.forward(
+            )
+            negative_adv_logits = self._target_forward_in_chunks(
                 negative_adv_flow.reshape(-1, *negative_adv_flow.shape[2:])
-            ).to(self.trainable_device)
+            )
 
         positive_original_scores, threshold = self._decision_scores(positive_original_logits.detach().reshape(-1))
         positive_adv_scores, _ = self._decision_scores(positive_adv_logits.detach().reshape(-1))
@@ -681,23 +683,39 @@ class TorchTrainer:
             return {}
         results = {}
         for target_fpr in self.config.report_fpr_targets:
-            calibration = threshold_at_target_fpr(score_buffers["clean_negative_scores"], target_fpr)
-            threshold = float(calibration["threshold"])
+            clean_calibration = threshold_at_target_fpr(score_buffers["clean_negative_scores"], target_fpr)
+            adv_calibration = threshold_at_target_fpr(score_buffers["adv_negative_scores"], target_fpr)
             key = f"fpr_{target_fpr:.0e}"
             results[key] = {
-                **calibration,
-                "clean": summarize_scores(
-                    score_buffers["clean_positive_scores"],
-                    score_buffers["clean_negative_scores"],
-                    threshold,
-                ),
-                "adversarial": summarize_scores(
-                    score_buffers["adv_positive_scores"],
-                    score_buffers["adv_negative_scores"],
-                    threshold,
-                ),
+                "clean": {
+                    **clean_calibration,
+                    **summarize_scores(
+                        score_buffers["clean_positive_scores"],
+                        score_buffers["clean_negative_scores"],
+                        float(clean_calibration["threshold"]),
+                    ),
+                },
+                "adversarial": {
+                    **adv_calibration,
+                    **summarize_scores(
+                        score_buffers["adv_positive_scores"],
+                        score_buffers["adv_negative_scores"],
+                        float(adv_calibration["threshold"]),
+                    ),
+                },
             }
         return results
+
+    def _target_forward_in_chunks(self, flow, exit_flow=None):
+        """Evaluate Work1-scale negative pairs without materializing target activations at once."""
+
+        outputs = []
+        chunk_size = int(self.config.evaluation_negative_batch_size)
+        for start in range(0, flow.shape[0], chunk_size):
+            end = min(start + chunk_size, flow.shape[0])
+            exit_chunk = None if exit_flow is None else exit_flow[start:end]
+            outputs.append(self.target_model.forward(flow[start:end], exit_flow=exit_chunk).to(self.trainable_device))
+        return self.torch.cat(outputs, dim=0)
 
     @staticmethod
     def _classification_summary(totals: dict[str, float], prefix: str) -> dict[str, float | int | bool]:

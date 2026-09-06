@@ -118,7 +118,9 @@ class ExperimentConfig:
     train_epochs: int = 2
     # 物理 batch size，即一次真正送入显存的样本条数。
     batch_size: int = 4
-    # 早停 patience；当前没有早停主逻辑，保留为兼容字段。
+    # 训练及训练期验证是否丢弃不足一个 batch 的尾批；独立测试始终保留全部样本。
+    training_drop_last: bool = False
+    # 早停 patience；设为 0 时关闭早停。
     patience: int = 100
     # Adam 学习率。
     learning_rate: float = 1e-3
@@ -138,12 +140,16 @@ class ExperimentConfig:
     split_seed: int = 2025
     # 评估使用 val 还是 test；DeepCoFFEA 当前只能用 test。
     eval_split: str = "val"
+    # 独立 --evaluate 使用的最终测试划分；训练期间仍使用 eval_split。
+    final_eval_split: str = "test"
     # 无缓存切分时验证集样本数。
     val_samples: int = 1000
     # 无缓存切分时测试集样本数。
     test_samples: int = 1000
     # 是否优先读取已有的 train/val/test 索引缓存。
     use_cached_indices: bool = True
+    # 第一工作点除 val/test 外还保留 1000 条不参与训练的样本。
+    deepcorr_unused_samples: int = 1000
     # 训练样本上限；0 表示不限制，smoke 阶段可用它快速截断。
     max_train_samples: int = 0
     # 评估样本上限；0 表示不限制。
@@ -197,6 +203,8 @@ class ExperimentConfig:
     report_fpr_targets: list[float] = field(default_factory=lambda: [1e-3, 1e-4])
     # Number of deterministic cross-session mismatches evaluated per positive.
     negative_pairs_per_sample: int = 1
+    # Maximum number of mismatched flows sent through the frozen target at once.
+    evaluation_negative_batch_size: int = 256
     # Optional training recovery and a simple epoch-wise exponential LR decay.
     resume_from_checkpoint: str = ""
     learning_rate_decay: float = 1.0
@@ -246,12 +254,14 @@ class ExperimentConfig:
             raise ValueError("deepcoffea_similarity_threshold must be in [-1, 1].")
         if self.deepcoffea_similarity_margin >= self.deepcoffea_similarity_threshold:
             raise ValueError("deepcoffea_similarity_margin must be lower than the decision threshold.")
-        if self.eval_split not in {"val", "test"}:
-            raise ValueError("eval_split 只支持 val 或 test。")
+        if self.eval_split not in {"val", "test"} or self.final_eval_split not in {"val", "test"}:
+            raise ValueError("eval_split 和 final_eval_split 只支持 val 或 test。")
         if self.val_samples < 0 or self.test_samples < 0:
             raise ValueError("val_samples 和 test_samples 不能为负数。")
         if self.max_train_samples < 0 or self.max_eval_samples < 0:
             raise ValueError("max_train_samples 和 max_eval_samples 不能为负数。")
+        if self.deepcorr_unused_samples < 0:
+            raise ValueError("deepcorr_unused_samples 不能为负数。")
         if self.max_train_steps < 0 or self.max_eval_steps < 0:
             raise ValueError("max_train_steps 和 max_eval_steps 不能为负数。")
         if self.visual_conv_channels <= 0:
@@ -272,6 +282,8 @@ class ExperimentConfig:
             raise ValueError("report_fpr_targets must contain values in (0, 1].")
         if self.negative_pairs_per_sample <= 0:
             raise ValueError("negative_pairs_per_sample must be positive.")
+        if self.evaluation_negative_batch_size <= 0:
+            raise ValueError("evaluation_negative_batch_size must be positive.")
         if not 0.0 < self.learning_rate_decay <= 1.0:
             raise ValueError("learning_rate_decay must be in (0, 1].")
         if self.data_loader == "real" and self.data.lower() in {"deepcoffea", "deepcoffea_real"} and self.eval_split == "val":
