@@ -6,9 +6,9 @@
   // train：训练；evaluate：加载 checkpoint 并执行正式 test 评估。
   "run_mode": "train",
 
-  // auto：启动前检查所有 GPU，自动选择两张空闲卡；也可明确写成 "3,1"。
+  // 直接填写两张物理 GPU 的序号，例如 "3,1"。启动器不检查显卡占用情况。
   // 第一张卡映射为 cuda:0，放冻结 Qwen；第二张映射为 cuda:1，放 Work2 和 DeepCorr300。
-  "visible_gpu_devices": "auto",
+  "visible_gpu_devices": "0,1",
 
   // 每组实验必须使用不同名称，否则会写入同一个 checkpoint 目录。
   "model_id": "second_workpoint_deepcorr300_work1_aligned",
@@ -52,16 +52,6 @@
   "use_temporal_branch": true,
   "use_visual_branch": true,
   "use_prompt_text": true,
-
-  // ============================================================================
-  // 【GPU 安全预检区：默认自动检查，不满足条件时直接拒绝启动】
-  // ============================================================================
-
-  "gpu_preflight_enabled": true,
-  "required_gpu_count": 2,
-  "gpu_max_memory_used_mb": 1024,
-  "gpu_max_utilization_percent": 10,
-  "gpu_min_free_memory_mb": 14000,
 
   // ============================================================================
   // 【Work1 对齐协议区：正式可比实验不要修改】

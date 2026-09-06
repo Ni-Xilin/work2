@@ -20,17 +20,7 @@ class ExperimentConfig:
     # 统一启动模式：auto 保留 is_training，train/evaluate 直接选择训练或正式评估。
     run_mode: str = "auto"
     # 传给 CUDA_VISIBLE_DEVICES 的物理 GPU 序号，顺序对应配置中的 cuda:0、cuda:1。
-    visible_gpu_devices: str = "auto"
-    # 启动前是否检查全部 GPU，并拒绝在忙碌卡上启动。
-    gpu_preflight_enabled: bool = True
-    # 实验固定使用的 GPU 数量。
-    required_gpu_count: int = 2
-    # 候选 GPU 允许的最大已用显存（MiB）。
-    gpu_max_memory_used_mb: int = 1024
-    # 候选 GPU 允许的最大利用率（%）。
-    gpu_max_utilization_percent: int = 10
-    # 候选 GPU 至少需要的空闲显存（MiB）。
-    gpu_min_free_memory_mb: int = 14000
+    visible_gpu_devices: str = "0,1"
     # 一键启动脚本用来运行训练器的 Python 解释器。
     python_executable: str = ""
     # 随机种子，控制数据切分、参数初始化和采样顺序的可复现性。
@@ -230,14 +220,9 @@ class ExperimentConfig:
     def validate(self) -> None:
         if self.run_mode not in {"auto", "train", "evaluate"}:
             raise ValueError("run_mode 只支持 auto、train 或 evaluate。")
-        if self.required_gpu_count <= 0:
-            raise ValueError("required_gpu_count 必须大于 0。")
-        if not self.gpu_preflight_enabled and self.visible_gpu_devices.strip().lower() == "auto":
-            raise ValueError("关闭 GPU 预检时，visible_gpu_devices 必须显式填写 GPU 序号。")
-        if self.gpu_max_memory_used_mb < 0 or self.gpu_max_utilization_percent < 0:
-            raise ValueError("GPU 预检阈值不能为负数。")
-        if self.gpu_min_free_memory_mb <= 0:
-            raise ValueError("gpu_min_free_memory_mb 必须大于 0。")
+        gpu_indices = [value.strip() for value in self.visible_gpu_devices.split(",") if value.strip()]
+        if len(gpu_indices) != 2 or len(set(gpu_indices)) != 2:
+            raise ValueError("visible_gpu_devices 必须填写两张不同的 GPU，例如 3,1。")
         if self.run_mode == "train":
             self.is_training = 1
         elif self.run_mode == "evaluate":
