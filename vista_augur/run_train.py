@@ -14,7 +14,7 @@ def main() -> None:
     parser.add_argument(
         "--config",
         type=str,
-        default="vista_augur/configs/second_workpoint_deepcorr300_torch_real_smoke.json",
+        default="vista_augur/configs/second_workpoint_deepcorr300_work1_aligned.jsonc",
         help="Path to the experiment JSON configuration.",
     )
     parser.add_argument(

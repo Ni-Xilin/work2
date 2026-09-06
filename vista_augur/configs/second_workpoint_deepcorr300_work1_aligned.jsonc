@@ -8,7 +8,7 @@
 
   // 直接填写两张物理 GPU 的序号，例如 "3,1"。启动器不检查显卡占用情况。
   // 第一张卡映射为 cuda:0，放冻结 Qwen；第二张映射为 cuda:1，放 Work2 和 DeepCorr300。
-  "visible_gpu_devices": "0,1",
+  "visible_gpu_devices": "1,3",
 
   // 每组实验必须使用不同名称，否则会写入同一个 checkpoint 目录。
   "model_id": "second_workpoint_deepcorr300_work1_aligned",

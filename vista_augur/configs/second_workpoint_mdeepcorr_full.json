@@ -1,4 +1,8 @@
 {
+  "run_mode": "train",
+  "visible_gpu_devices": "0,1",
+  "python_executable": "/home/xilin/anaconda3/envs/deepcorr/bin/python",
+  "resume_from_checkpoint": "",
   "model_id": "second_workpoint_mdeepcorr_full",
   "model": "SecondWorkpointTorchRealModel",
   "target_model": "mDeepcorr",
@@ -14,6 +18,7 @@
   "time_channel_indices": [0, 1],
   "size_channel_indices": [2, 3],
   "eval_split": "val",
+  "final_eval_split": "test",
   "train_epochs": 20,
   "batch_size": 4,
   "negative_pairs_per_sample": 10,

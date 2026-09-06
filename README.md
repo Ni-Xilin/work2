@@ -5,7 +5,7 @@
 ## 核心实现
 
 - `vista_augur/second_workpoint/`：数据、模型、损失函数、评估与训练代码。
-- `vista_augur/configs/`：smoke、完整实验和消融实验配置。
+- `vista_augur/configs/`：当前主线和两个后续跨攻击模型预设，详见该目录的 `README.md`。
 - `datasets/`：本地 DeepCorr 与 DeepCoFFEA 数据，Git 不跟踪。
 - `target_model/`：冻结攻击模型实现及其本地 checkpoint。
 - `base_models/`：本地 Hugging Face 基模快照，Git 不跟踪。
@@ -37,8 +37,6 @@ huggingface-cli download Qwen/Qwen2.5-1.5B-Instruct \
 
 ```bash
 PYTHONPATH=vista_augur python -m unittest discover -s vista_augur/tests -v
-PYTHONPATH=vista_augur python vista_augur/run_train.py \
-  --config vista_augur/configs/second_workpoint_deepcorr300_torch_real_smoke.json
 ```
 
 运行完整 DeepCorr300 实验：
