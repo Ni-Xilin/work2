@@ -36,6 +36,7 @@ Run commands from the repository root. The Python import root is `vista_augur/`.
 ## Implementation Rules
 
 - Prefer the smallest change that cleanly satisfies the task.
+- Before deleting any local or remote file, directory, dataset, model weight, checkpoint, log, document, or generated artifact, present the exact deletion list and its recovery implications to the user and obtain explicit confirmation. A general cleanup request does not waive this confirmation requirement. Do not begin deletion while confirmation is pending.
 - Reuse existing modules and configuration fields before adding abstractions.
 - Do not add dependencies unless explicitly requested or technically unavoidable.
 - Keep the frozen Qwen backbone and frozen target model differentiable with respect to generator inputs.
