@@ -66,10 +66,14 @@ class GroupedTrainingTests(unittest.TestCase):
         trainer.target_model = _FakeTarget()
         trainer.criterion = TargetedOverheadLoss(config)
 
+        signed_future = torch.tensor(
+            [[[[1.0, -2.0, 0.0, 3.0], [1.0, -2.0, 0.0, 3.0]],
+              [[1.0, -2.0, 0.0, 3.0], [1.0, -2.0, 0.0, 3.0]]]]
+        )
         batch = {
             "full_flow": torch.ones(1, 4, 8),
             "history_seq": torch.ones(1, 2, 4, 4),
-            "clean_future": torch.ones(1, 2, 2, 4),
+            "clean_future": signed_future,
             "prompt_text": [["first", "second"]],
             "future_mask": torch.ones(1, 2, 2),
             "writeback_meta": torch.tensor([[[4, 2], [6, 2]]]),
@@ -81,8 +85,17 @@ class GroupedTrainingTests(unittest.TestCase):
         outputs["loss"].backward()
 
         adversarial_target_flow = trainer.target_model.calls[1]
-        for row in config.tor_row_indices:
-            torch.testing.assert_close(adversarial_target_flow[0, row, 4:8], torch.full((4,), 1.1))
+        expected_by_row = {
+            0: 1.1,
+            3: -2.1,
+            4: 0.0,
+            7: 3.1,
+        }
+        for row, expected in expected_by_row.items():
+            torch.testing.assert_close(
+                adversarial_target_flow[0, row, 4:8],
+                torch.full((4,), expected),
+            )
         self.assertEqual(outputs["batch_weight"], 1)
         self.assertGreater(float(trainer.model.last_perturbation.grad.abs().sum()), 0.0)
 

@@ -260,7 +260,10 @@ class TorchTrainer:
         elif self.config.adv_type == "size":
             channel_mask[self.config.time_channel_indices] = 0.0
         positive_delta = positive_delta * channel_mask.view(1, 1, -1)
-        direction = self.torch.where(clean_future >= 0.0, self.torch.ones_like(clean_future), -self.torch.ones_like(clean_future))
+        # The sign encodes packet direction only; the generated value contributes
+        # exclusively to the non-negative time/size magnitude.  torch.sign also
+        # keeps padded or otherwise empty zero positions at zero.
+        direction = self.torch.sign(clean_future)
         adv_future = direction * (clean_future.abs() + positive_delta)
 
         adv_flow = full_flow.clone()
