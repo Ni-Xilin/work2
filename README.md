@@ -44,28 +44,22 @@ PYTHONPATH=vista_augur python vista_augur/run_train.py \
 运行完整 DeepCorr300 实验：
 
 ```bash
-PYTHONPATH=vista_augur python vista_augur/run_train.py \
-  --config vista_augur/configs/second_workpoint_deepcorr300_torch_real_full_text_prototypes.json
+bash run_work2.sh
 ```
 
-该配置对齐第一工作点的训练协议：`batch_size=16`、训练期 `drop_last=true`、20 epoch、学习率 `0.01`、每轮乘 `0.8`，损失权重为 `beta/alpha/gamma=1/3/0.9`。训练期间只使用匹配正样本；独立测试保留全部样本，并为每个正样本构造 199 个负样本。
+唯一需要日常编辑的文件是 `vista_augur/configs/second_workpoint_deepcorr300_work1_aligned.jsonc`。其中已用分隔线标出日常运行区、主要调参区、GPU 安全预检区、Work1 对齐协议区和资源路径区，并附有中文注释。
+
+启动脚本会先显示所有 GPU 的显存和利用率，只有找到两张满足阈值的空闲卡才会继续。该配置对齐第一工作点的训练协议：`batch_size=16`、训练期 `drop_last=true`、20 epoch、学习率 `0.01`、每轮乘 `0.8`，损失权重为 `beta/alpha/gamma=1/3/0.9`。
 
 调参时复制该 JSON 并修改 `model_id`，避免覆盖已有 checkpoint。通常只调整 `learning_rate`、`learning_rate_decay`、`beta`、`alpha`、`gamma`、`batch_size`、`train_epochs` 和 `patience`；数据划分及评估字段不应改动。
 
-无需修改 JSON 即可恢复训练或评估已保存的生成器：
+恢复训练时将 `resume_from_checkpoint` 改为 `latest`；正式评估时将 `run_mode` 改为 `evaluate`、将 `resume_from_checkpoint` 改为 `best`，两者都执行同一条命令：
 
 ```bash
-PYTHONPATH=vista_augur python vista_augur/run_train.py \
-  --config vista_augur/configs/second_workpoint_deepcorr300_torch_real_full_text_prototypes.json \
-  --resume vista_augur/outputs/checkpoints/<run>/best.pt
-
-PYTHONPATH=vista_augur python vista_augur/run_train.py \
-  --config vista_augur/configs/second_workpoint_deepcorr300_torch_real_full_text_prototypes.json \
-  --resume vista_augur/outputs/checkpoints/<run>/best.pt \
-  --evaluate
+bash run_work2.sh
 ```
 
-`--evaluate` 默认使用 `final_eval_split=test`，并在 `10^-3`、`10^-4` FPR 下分别为 clean 和 adversarial 分数校准阈值。需要诊断验证集时可显式添加 `--eval-split val`。
+`run_mode=evaluate` 默认使用 `final_eval_split=test`，并在 `10^-3`、`10^-4` FPR 下分别为 clean 和 adversarial 分数校准阈值。
 
 ## 指标术语
 

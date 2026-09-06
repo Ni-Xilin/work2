@@ -22,7 +22,7 @@ case "$group" in
         configs=(
             second_workpoint_deepcorr300_torch_real_probe_text_prototypes.json
             second_workpoint_deepcorr300_torch_real_tune_text_prototypes.json
-            second_workpoint_deepcorr300_torch_real_full_text_prototypes.json
+            second_workpoint_deepcorr300_work1_aligned.jsonc
         )
         ;;
     ablation)
@@ -48,7 +48,7 @@ esac
 
 for config_name in "${configs[@]}"; do
     timestamp="$(date +%Y%m%d-%H%M%S)"
-    log_path="$log_dir/${config_name%.json}-$timestamp.log"
+    log_path="$log_dir/${config_name%.*}-$timestamp.log"
     echo "Running $config_name; log=$log_path"
     CUDA_VISIBLE_DEVICES="$visible_devices" PYTHONPATH=vista_augur \
         "$python_bin" vista_augur/run_train.py \

@@ -17,6 +17,22 @@ from typing import Any
 
 @dataclass
 class ExperimentConfig:
+    # 统一启动模式：auto 保留 is_training，train/evaluate 直接选择训练或正式评估。
+    run_mode: str = "auto"
+    # 传给 CUDA_VISIBLE_DEVICES 的物理 GPU 序号，顺序对应配置中的 cuda:0、cuda:1。
+    visible_gpu_devices: str = "auto"
+    # 启动前是否检查全部 GPU，并拒绝在忙碌卡上启动。
+    gpu_preflight_enabled: bool = True
+    # 实验固定使用的 GPU 数量。
+    required_gpu_count: int = 2
+    # 候选 GPU 允许的最大已用显存（MiB）。
+    gpu_max_memory_used_mb: int = 1024
+    # 候选 GPU 允许的最大利用率（%）。
+    gpu_max_utilization_percent: int = 10
+    # 候选 GPU 至少需要的空闲显存（MiB）。
+    gpu_min_free_memory_mb: int = 14000
+    # 一键启动脚本用来运行训练器的 Python 解释器。
+    python_executable: str = ""
     # 随机种子，控制数据切分、参数初始化和采样顺序的可复现性。
     random_seed: int = 2025
     # 是否进入训练模式；1 表示训练，0 表示只做评估。
@@ -212,6 +228,21 @@ class ExperimentConfig:
     backend: str = "torch_real"
 
     def validate(self) -> None:
+        if self.run_mode not in {"auto", "train", "evaluate"}:
+            raise ValueError("run_mode 只支持 auto、train 或 evaluate。")
+        if self.required_gpu_count <= 0:
+            raise ValueError("required_gpu_count 必须大于 0。")
+        if not self.gpu_preflight_enabled and self.visible_gpu_devices.strip().lower() == "auto":
+            raise ValueError("关闭 GPU 预检时，visible_gpu_devices 必须显式填写 GPU 序号。")
+        if self.gpu_max_memory_used_mb < 0 or self.gpu_max_utilization_percent < 0:
+            raise ValueError("GPU 预检阈值不能为负数。")
+        if self.gpu_min_free_memory_mb <= 0:
+            raise ValueError("gpu_min_free_memory_mb 必须大于 0。")
+        if self.run_mode == "train":
+            self.is_training = 1
+        elif self.run_mode == "evaluate":
+            self.is_training = 0
+            self.eval_split = self.final_eval_split
         if self.flow_size < self.seq_len + self.pred_len:
             raise ValueError("flow_size 必须不小于 seq_len + pred_len。")
         if self.seq_len % self.patch_len != 0:
@@ -296,6 +327,10 @@ class ExperimentConfig:
             raise ValueError(f"backbone_model_path 不存在: {self.backbone_model_path}")
         if self.target_model_path and not Path(self.target_model_path).exists():
             raise ValueError(f"target_model_path 不存在: {self.target_model_path}")
+        if self.resume_from_checkpoint in {"best", "latest"}:
+            self.resume_from_checkpoint = str(
+                Path(self.checkpoints) / self.setting_name() / f"{self.resume_from_checkpoint}.pt"
+            )
         if self.resume_from_checkpoint and not Path(self.resume_from_checkpoint).exists():
             raise ValueError(f"resume_from_checkpoint does not exist: {self.resume_from_checkpoint}")
         self._validate_source_indices(self.tor_row_indices, "tor_row_indices", upper_bound=8)
@@ -315,7 +350,7 @@ class ExperimentConfig:
     def setting_name(self) -> str:
         return (
             f"{self.model_id}_{self.model}_{self.data}"
-            f"_sl{self.seq_len}_pl{self.pred_len}_dm{self.d_model}_nh{self.n_heads}"
+            f"_sl{self.seq_len}_pl{self.pred_len}_dm{self.trainable_width}_nh{self.n_heads}"
             f"_sa{self.semantic_alignment_mode}"
         )
 
@@ -325,8 +360,50 @@ class ExperimentConfig:
 
 def load_config(config_path: str | Path) -> ExperimentConfig:
     path = Path(config_path)
-    with path.open("r", encoding="utf-8") as file:
-        payload = json.load(file)
+    payload = json.loads(_strip_json_comments(path.read_text(encoding="utf-8")))
     config = ExperimentConfig(**payload)
     config.validate()
     return config
+
+
+def _strip_json_comments(source: str) -> str:
+    """删除 JSONC 中的 // 和 /* */ 注释，同时保留字符串里的同类字符。"""
+
+    output: list[str] = []
+    index = 0
+    in_string = False
+    escaped = False
+    while index < len(source):
+        char = source[index]
+        next_char = source[index + 1] if index + 1 < len(source) else ""
+        if in_string:
+            output.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            index += 1
+            continue
+        if char == '"':
+            in_string = True
+            output.append(char)
+            index += 1
+            continue
+        if char == "/" and next_char == "/":
+            index += 2
+            while index < len(source) and source[index] not in "\r\n":
+                index += 1
+            continue
+        if char == "/" and next_char == "*":
+            index += 2
+            while index + 1 < len(source) and source[index : index + 2] != "*/":
+                if source[index] in "\r\n":
+                    output.append(source[index])
+                index += 1
+            index += 2
+            continue
+        output.append(char)
+        index += 1
+    return "".join(output)
