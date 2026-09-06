@@ -48,6 +48,26 @@ class ExperimentConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "mdeepcorr_stage1_threshold"):
             config.validate()
 
+    def test_mdeepcorr_requires_700_packet_data(self):
+        config = self.make_config(
+            target_model="mDeepcorr",
+            data="mDeepcorr",
+            flow_size=300,
+            mdeepcorr100_model_path="missing-100.pth",
+            mdeepcorr700_model_path="missing-700.pth",
+        )
+        with self.assertRaisesRegex(ValueError, "flow_size=700"):
+            config.validate()
+
+    def test_mdeepcorr_requires_explicit_stage_weights(self):
+        config = self.make_config(
+            target_model="mDeepcorr",
+            data="mDeepcorr",
+            flow_size=700,
+        )
+        with self.assertRaisesRegex(ValueError, "explicit mdeepcorr100_model_path"):
+            config.validate()
+
     def test_loads_commented_json_config(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "experiment.jsonc"

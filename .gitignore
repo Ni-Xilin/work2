@@ -27,6 +27,9 @@ datasets/*
 !datasets/README.md
 base_models/
 
+# Local read-only clone of the first-work-point repository
+/work1_reference/
+
 # Large reference documents
 *.pdf
 

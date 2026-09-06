@@ -7,14 +7,17 @@
 from __future__ import annotations
 
 from second_workpoint.config import ExperimentConfig
-from second_workpoint.data.real_dataset import DeepCoffeaRealDataset, DeepCorrRealDataset
+from second_workpoint.data.real_dataset import DeepCoffeaRealDataset, DeepCorrRealDataset, MDeepCorrRealDataset
+
 
 def build_dataset(config: ExperimentConfig, split: str):
     """根据配置构造数据集实例。"""
 
     dataset_name = config.data.lower()
-    if dataset_name in {"deepcorr300", "deepcorr", "mdeepcorr"}:
+    if dataset_name in {"deepcorr300", "deepcorr"}:
         return DeepCorrRealDataset(config, split=split)
+    if dataset_name == "mdeepcorr":
+        return MDeepCorrRealDataset(config, split=split)
     if dataset_name in {"deepcoffea", "deepcoffea_real"}:
         return DeepCoffeaRealDataset(config, split=split)
 

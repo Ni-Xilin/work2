@@ -8,10 +8,12 @@ from pathlib import Path
 import numpy as np
 
 from second_workpoint.config import ExperimentConfig
+from second_workpoint.data.factory import build_dataset
 from second_workpoint.data.real_dataset import (
     DEEP_CORR_RUN_NAMES,
     DeepCoffeaRealDataset,
     DeepCorrRealDataset,
+    MDeepCorrRealDataset,
     _build_deterministic_split,
     _build_negative_index_map,
 )
@@ -109,6 +111,49 @@ class DeepCorrDatasetTests(unittest.TestCase):
             self.assertEqual(sample["writeback_meta"].tolist(), [[96, 48], [144, 48], [192, 48], [240, 48]])
             self.assertEqual(sample["target_full_flow"].shape, (8, 300))
             self.assertEqual(sample["target_negative_flow"].shape, (1, 8, 300))
+
+    def test_mdeepcorr_uses_raw_300_named_files_at_700_packet_length(self):
+        with tempfile.TemporaryDirectory() as directory:
+            raw_sample = {
+                "here": [
+                    {"<-": list(np.arange(700, dtype=np.float32) / 1000.0), "->": [0.2] * 700},
+                    {"<-": [300.0] * 700, "->": [400.0] * 700},
+                ],
+                "there": [
+                    {"->": [0.3] * 700, "<-": [0.4] * 700},
+                    {"->": [500.0] * 700, "<-": [600.0] * 700},
+                ],
+            }
+            for run_name in DEEP_CORR_RUN_NAMES:
+                with (Path(directory) / f"{run_name}_tordata300.pickle").open("wb") as file:
+                    pickle.dump([raw_sample], file)
+
+            config = ExperimentConfig(
+                data="mDeepcorr",
+                target_model="mDeepcorr",
+                data_path=directory,
+                use_cached_indices=False,
+                val_samples=1,
+                test_samples=2,
+                deepcorr_unused_samples=1,
+                eval_split="test",
+                flow_size=700,
+                seq_len=96,
+                pred_len=48,
+                patch_len=4,
+                stride=48,
+                enc_in=4,
+                backbone_model_path="",
+            )
+            sample = MDeepCorrRealDataset(config, split="eval")[0]
+
+            self.assertIsInstance(build_dataset(config, split="eval"), MDeepCorrRealDataset)
+            self.assertEqual(sample["history_seq"].shape, (12, 4, 96))
+            self.assertEqual(sample["clean_future"].shape, (12, 48, 4))
+            self.assertEqual(sample["writeback_meta"][0].tolist(), [96, 48])
+            self.assertEqual(sample["writeback_meta"][-1].tolist(), [624, 48])
+            self.assertEqual(sample["target_full_flow"].shape, (8, 700))
+            self.assertGreater(float(sample["target_full_flow"][0, 699]), 0.0)
 
     def test_work1_split_reserves_unused_samples(self):
         values = {

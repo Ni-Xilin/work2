@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CONFIG = PROJECT_ROOT / "vista_augur/configs/second_workpoint_deepcorr300_work1_aligned.jsonc"
+DEFAULT_CONFIG = PROJECT_ROOT / "vista_augur/configs/deepcorr_config.jsonc"
 
 
 def main() -> int:

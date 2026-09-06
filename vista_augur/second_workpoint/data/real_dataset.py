@@ -180,6 +180,23 @@ class DeepCorrRealDataset:
         return starts
 
 
+class MDeepCorrRealDataset(DeepCorrRealDataset):
+    """Work1-compatible mDeepCorr data path.
+
+    Work1 intentionally reads the ``*_tordata300.pickle`` files because those
+    files contain the original variable-length packet sequences.  mDeepCorr
+    then pads or truncates those raw sequences to 700 packets before creating
+    the generator windows.  Keeping this as a distinct dataset type prevents
+    future mDeepCorr-specific changes from altering the completed DeepCorr300
+    path.
+    """
+
+    def __init__(self, config: ExperimentConfig, split: str) -> None:
+        if int(config.flow_size) != 700:
+            raise ValueError("mDeepCorr requires flow_size=700 to match the DC700 second stage.")
+        super().__init__(config, split)
+
+
 class DeepCoffeaRealDataset:
     """DeepCoFFEA 真实数据集。
 

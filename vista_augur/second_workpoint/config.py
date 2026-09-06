@@ -320,9 +320,15 @@ class ExperimentConfig:
         if self.target_model_path and not Path(self.target_model_path).exists():
             raise ValueError(f"target_model_path 不存在: {self.target_model_path}")
         if self.target_model.lower() in {"mdeepcorr", "mdeepcorrtorch"}:
+            if self.data.lower() != "mdeepcorr":
+                raise ValueError("mDeepCorr target requires data=mDeepcorr.")
+            if self.flow_size != 700:
+                raise ValueError("mDeepCorr target requires flow_size=700 for the DC700 second stage.")
             for field_name in ("mdeepcorr100_model_path", "mdeepcorr700_model_path"):
                 configured_path = str(getattr(self, field_name)).strip()
-                if configured_path and not Path(configured_path).exists():
+                if not configured_path:
+                    raise ValueError(f"mDeepCorr target requires an explicit {field_name}.")
+                if not Path(configured_path).exists():
                     raise ValueError(f"{field_name} 不存在: {configured_path}")
         if self.resume_from_checkpoint in {"best", "latest"}:
             self.resume_from_checkpoint = str(

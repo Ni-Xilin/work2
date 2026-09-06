@@ -47,7 +47,7 @@ bash run_work2_mdeepcorr.sh
 bash run_work2_deepcoffea.sh
 ```
 
-唯一需要日常编辑的文件是 `vista_augur/configs/second_workpoint_deepcorr300_work1_aligned.jsonc`。其中已用分隔线标出日常运行区、主要调参区、GPU 设置区、Work1 对齐协议区和资源路径区，并附有中文注释。
+三份目标配置分别是 `vista_augur/configs/deepcorr_config.jsonc`、`vista_augur/configs/mdeepcorr_config.jsonc` 和 `vista_augur/configs/deepcoffea_config.jsonc`。每份配置均用分隔线标出日常运行区、主要调参区、目标协议区和资源路径区，并附有中文注释。
 
 启动脚本直接使用 `visible_gpu_devices` 中填写的两张 GPU，不检查显卡占用情况。该配置对齐第一工作点的训练协议：`batch_size=16`、训练期 `drop_last=true`、20 epoch、学习率 `0.01`、每轮乘 `0.8`，损失权重为 `beta/alpha/gamma=1/3/0.9`。
 

@@ -1,0 +1,128 @@
+{
+  // ============================================================================
+  // 【日常运行区：通常只需要修改这一段】
+  // ============================================================================
+
+  // train：训练；evaluate：加载 checkpoint 并执行正式 test 评估。
+  "run_mode": "train",
+
+  // 直接填写两张物理 GPU 的序号，例如 "3,1"。启动器不检查显卡占用情况。
+  // 第一张卡映射为 cuda:0，放冻结 Qwen；第二张放 Work2、DC100 和 DC700。
+  "visible_gpu_devices": "2,3",
+
+  // 每组实验必须使用不同名称，否则会写入同一个 checkpoint 目录。
+  "model_id": "second_workpoint_mdeepcorr_full",
+
+  // 新训练填写空字符串；断点训练填写 latest 或具体 .pt 路径；正式评估通常填写 best。
+  "resume_from_checkpoint": "",
+
+  // 训练及数据切分随机种子。
+  "random_seed": 2025,
+
+  // 服务器训练环境。只有 Python 环境位置变化时才需要修改。
+  "python_executable": "/home/xilin/anaconda3/envs/deepcorr/bin/python",
+
+  // ============================================================================
+  // 【主要调参区：你的参数实验主要修改这一段】
+  // ============================================================================
+
+  // Work1 mDeepCorr 使用 20 epoch、Adam 1e-2 和逐 epoch 乘 0.8 的衰减。
+  // 物理 batch 为 4，梯度累积 4 次，因此有效 batch 约为 16。
+  "train_epochs": 20,
+  "batch_size": 4,
+  "gradient_accumulation_steps": 4,
+  "learning_rate": 0.01,
+  "learning_rate_decay": 0.8,
+  "lradj": "type3",
+  "patience": 100,
+  "max_grad_norm": 1.0,
+
+  // 总损失：beta × 目标误导损失 + alpha × 时间开销 + gamma × 大小开销。
+  "beta": 1.0,
+  "alpha": 0.75,
+  "gamma": 0.9,
+
+  // Work2 可训练模块容量。trainable_width 必须能被 n_heads 整除。
+  "trainable_width": 128,
+  "n_heads": 4,
+  "visual_conv_channels": 8,
+  "reprogramming_num_prototypes": 32,
+  "semantic_alignment_mode": "text_prototypes",
+
+  // 三个输入分支开关；时序和视觉分支不能同时关闭。
+  "use_temporal_branch": true,
+  "use_visual_branch": true,
+  "use_prompt_text": true,
+
+  // ============================================================================
+  // 【mDeepCorr / Work1 对齐协议区：正式可比实验不要修改】
+  // ============================================================================
+
+  // DC100 先按概率 0.01 筛选，放行样本再采用 DC700 的输出分数。
+  // decision_threshold=0.1 用于训练期 Recall/ASR 统计，不替代第一阶段阈值。
+  "mdeepcorr_stage1_threshold": 0.01,
+  "decision_threshold": 0.1,
+
+  "training_drop_last": true,
+  "eval_split": "val",
+  "final_eval_split": "test",
+  "split_seed": 2025,
+  "val_samples": 1000,
+  "test_samples": 1000,
+  "deepcorr_unused_samples": 1000,
+  "use_cached_indices": true,
+  "negative_pairs_per_sample": 199,
+  "evaluation_negative_batch_size": 256,
+  "report_fpr_targets": [0.001, 0.0001],
+
+  // Work1 读取名为 *_tordata300.pickle 的原始变长序列，再按 700 截断或补零。
+  // 700 长度产生 12 个 (96 history + 48 future) 滑动窗口。
+  "flow_size": 700,
+  "seq_len": 96,
+  "pred_len": 48,
+  "patch_len": 4,
+  "stride": 48,
+  "enc_in": 4,
+  "time_channel_indices": [0, 1],
+  "size_channel_indices": [2, 3],
+  "tor_row_indices": [0, 3, 4, 7],
+
+  // ============================================================================
+  // 【资源与实现区：文件位置或运行环境变化时修改】
+  // ============================================================================
+
+  "model": "SecondWorkpointTorchRealModel",
+  "target_model": "mDeepcorr",
+  "target_model_mode": "torch",
+  "target_model_root": "target_model",
+
+  // mDeepCorr 不使用通用单模型路径，必须分别填写下面两份权重。
+  "target_model_path": "",
+  "mdeepcorr100_model_path": "target_model/deepcorr/deepcorr100/tor_199_epoch10_acc0.66.pth",
+  "mdeepcorr700_model_path": "target_model/deepcorr/deepcorr700/tor700_199_epoch11_acc0.88.pth",
+  "target_model_dropout": 0.0,
+
+  "data": "mDeepcorr",
+  "data_loader": "real",
+  "data_path": "datasets/deepcorr",
+  "checkpoints": "vista_augur/outputs/checkpoints",
+  "backbone_mode": "hf_frozen",
+  "backbone_model_name": "Qwen/Qwen2.5-1.5B-Instruct",
+  "backbone_model_path": "base_models/Qwen2.5-1.5B-Instruct",
+  "backbone_dtype": "float16",
+  "backbone_quantization": "none",
+  "backbone_prompt_max_tokens": 64,
+  "backbone_device": "cuda:0",
+  "trainable_device": "cuda:1",
+  "target_device": "cuda:1",
+  "adv_type": "time_and_size",
+  "backend": "torch_real",
+
+  // 0 表示不限制；只在 smoke/debug 时设置很小的正数。
+  "max_train_samples": 0,
+  "max_eval_samples": 0,
+  "max_train_steps": 0,
+  "max_eval_steps": 0,
+  "log_interval": 100,
+  "num_workers": 0
+}
