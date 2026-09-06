@@ -43,6 +43,11 @@ class ExperimentConfig:
     target_model_path: str = ""
     # target model 前向时使用的 dropout，通常保持为 0.0 以稳定反馈。
     target_model_dropout: float = 0.0
+    # m-DeepCorr 第一阶段 DeepCorr100 权重及其筛选概率阈值。
+    mdeepcorr100_model_path: str = ""
+    mdeepcorr_stage1_threshold: float = 0.01
+    # m-DeepCorr 第二阶段 DeepCorr700 权重。
+    mdeepcorr700_model_path: str = ""
     # DeepCoFFEA 中 tor 侧期望的输入序列长度。
     deepcoffea_tor_len: int = 500
     # DeepCoFFEA 中 exit 侧期望的输入序列长度。
@@ -262,6 +267,8 @@ class ExperimentConfig:
             raise ValueError("backbone_split_layer_index must be >= 0.")
         if self.target_model_dropout < 0.0 or self.target_model_dropout >= 1.0:
             raise ValueError("target_model_dropout must be in [0, 1).")
+        if not 0.0 < self.mdeepcorr_stage1_threshold < 1.0:
+            raise ValueError("mdeepcorr_stage1_threshold must be in (0, 1).")
         if self.deepcoffea_tor_len <= 0 or self.deepcoffea_exit_len <= 0:
             raise ValueError("deepcoffea_tor_len and deepcoffea_exit_len must be positive.")
         if not -1.0 <= self.deepcoffea_similarity_margin <= 1.0:
@@ -312,6 +319,11 @@ class ExperimentConfig:
             raise ValueError(f"backbone_model_path 不存在: {self.backbone_model_path}")
         if self.target_model_path and not Path(self.target_model_path).exists():
             raise ValueError(f"target_model_path 不存在: {self.target_model_path}")
+        if self.target_model.lower() in {"mdeepcorr", "mdeepcorrtorch"}:
+            for field_name in ("mdeepcorr100_model_path", "mdeepcorr700_model_path"):
+                configured_path = str(getattr(self, field_name)).strip()
+                if configured_path and not Path(configured_path).exists():
+                    raise ValueError(f"{field_name} 不存在: {configured_path}")
         if self.resume_from_checkpoint in {"best", "latest"}:
             self.resume_from_checkpoint = str(
                 Path(self.checkpoints) / self.setting_name() / f"{self.resume_from_checkpoint}.pt"

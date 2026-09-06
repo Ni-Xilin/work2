@@ -11,7 +11,7 @@
 - `base_models/`：本地 Hugging Face 基模快照，Git 不跟踪。
 - `vista_augur/outputs/`：训练 checkpoint 与日志，Git 不跟踪。
 
-主实验目标为 DeepCorr300；m-DeepCorr 与 DeepCoFFEA 配置用于后续跨攻击模型验证。
+Work2 分别支持 DeepCorr300、两阶段 m-DeepCorr 和 DeepCoFFEA 三个冻结攻击目标。三者使用独立配置和启动脚本，避免结果目录与运行参数混用。
 
 对于 DeepCorr300 和 m-DeepCorr，每个数据集样本代表一条完整流量。模型会先同时生成该流全部历史窗口对应的未来扰动，再将其全部写回完整流量，最后由冻结攻击模型给出训练反馈。DeepCoFFEA 因不同会话的窗口数不同，保留按窗口在线处理的主线。
 
@@ -39,10 +39,12 @@ huggingface-cli download Qwen/Qwen2.5-1.5B-Instruct \
 PYTHONPATH=vista_augur python -m unittest discover -s vista_augur/tests -v
 ```
 
-运行完整 DeepCorr300 实验：
+三个目标分别使用以下入口：
 
 ```bash
-bash run_work2.sh
+bash run_work2_deepcorr.sh
+bash run_work2_mdeepcorr.sh
+bash run_work2_deepcoffea.sh
 ```
 
 唯一需要日常编辑的文件是 `vista_augur/configs/second_workpoint_deepcorr300_work1_aligned.jsonc`。其中已用分隔线标出日常运行区、主要调参区、GPU 设置区、Work1 对齐协议区和资源路径区，并附有中文注释。
@@ -54,7 +56,7 @@ bash run_work2.sh
 恢复训练时将 `resume_from_checkpoint` 改为 `latest`；正式评估时将 `run_mode` 改为 `evaluate`、将 `resume_from_checkpoint` 改为 `best`，两者都执行同一条命令：
 
 ```bash
-bash run_work2.sh
+bash run_work2_deepcorr.sh
 ```
 
 `run_mode=evaluate` 默认使用 `final_eval_split=test`，并在 `10^-3`、`10^-4` FPR 下分别为 clean 和 adversarial 分数校准阈值。

@@ -24,8 +24,10 @@ def build_torch_target_model(config: ExperimentConfig):
         return DeepCorrTorchTarget(config, variant="300")
     if target_name in {"deepcorr100", "deepcorr100torch"}:
         return DeepCorrTorchTarget(config, variant="100")
-    if target_name in {"deepcorr700", "mdeepcorr", "mdeepcorrtorch"}:
+    if target_name in {"deepcorr700"}:
         return DeepCorrTorchTarget(config, variant="700")
+    if target_name in {"mdeepcorr", "mdeepcorrtorch"}:
+        return MDeepCorrTorchTarget(config)
     if target_name in {"deepcoffea", "deepcoffea_real", "deepcoffeatorch"}:
         return DeepCoFFEATorchTarget(config)
     raise ValueError(f"Unsupported torch target_model: {config.target_model}")
@@ -75,6 +77,69 @@ class DeepCorrTorchTarget:
 
     def parameters(self):
         return self.model.parameters()
+
+
+class MDeepCorrTorchTarget:
+    """Work1 two-stage m-DeepCorr cascade: DeepCorr100 then DeepCorr700."""
+
+    _DEFAULT_CHECKPOINT_100 = "deepcorr/deepcorr100/tor_199_epoch10_acc0.66.pth"
+    _DEFAULT_CHECKPOINT_700 = "deepcorr/deepcorr700/tor700_199_epoch11_acc0.88.pth"
+
+    def __init__(self, config: ExperimentConfig) -> None:
+        self.config = config
+        self.torch = _import_torch()
+        self.device = _torch_device(self.torch, config)
+        root = Path(config.target_model_root)
+
+        module100 = _load_module(root / "Deepcorr100.py", "work2_target_mdeepcorr_100")
+        module700 = _load_module(root / "Deepcorr700.py", "work2_target_mdeepcorr_700")
+        self.model100 = module100.Model().float().to(self.device)
+        self.model700 = module700.Model().float().to(self.device)
+
+        checkpoint100 = _resolve_explicit_checkpoint(
+            config.mdeepcorr100_model_path,
+            root / self._DEFAULT_CHECKPOINT_100,
+            "mdeepcorr100_model_path",
+        )
+        checkpoint700 = _resolve_explicit_checkpoint(
+            config.mdeepcorr700_model_path,
+            root / self._DEFAULT_CHECKPOINT_700,
+            "mdeepcorr700_model_path",
+        )
+        self.model100.load_state_dict(_torch_load(self.torch, checkpoint100, self.device))
+        self.model700.load_state_dict(_torch_load(self.torch, checkpoint700, self.device))
+        self.model100.eval()
+        self.model700.eval()
+        for parameter in list(self.model100.parameters()) + list(self.model700.parameters()):
+            parameter.requires_grad = False
+
+    def forward(self, adv_flow, exit_flow=None):
+        flow100 = _prepare_deepcorr_flow_torch(
+            adv_flow=adv_flow,
+            expected_length=100,
+            tor_row_indices=self.config.tor_row_indices,
+            torch_module=self.torch,
+            device=self.device,
+        )
+        flow700 = _prepare_deepcorr_flow_torch(
+            adv_flow=adv_flow,
+            expected_length=700,
+            tor_row_indices=self.config.tor_row_indices,
+            torch_module=self.torch,
+            device=self.device,
+        )
+        stage1_logits = self.model100(flow100, dropout=float(self.config.target_model_dropout))
+        stage2_logits = self.model700(flow700, dropout=float(self.config.target_model_dropout))
+        return _mdeepcorr_cascade_logits(
+            stage1_logits,
+            stage2_logits,
+            threshold=float(self.config.mdeepcorr_stage1_threshold),
+            torch_module=self.torch,
+        )
+
+    def parameters(self):
+        yield from self.model100.parameters()
+        yield from self.model700.parameters()
 
 
 class DeepCoFFEATorchTarget:
@@ -171,6 +236,24 @@ def _resolve_checkpoint(config: ExperimentConfig, default_relative_path: str) ->
     if not checkpoint.exists():
         raise FileNotFoundError(f"Target model checkpoint not found: {checkpoint}")
     return checkpoint
+
+
+def _resolve_explicit_checkpoint(configured_path: str, default_path: Path, field_name: str) -> Path:
+    checkpoint = Path(configured_path) if str(configured_path).strip() else default_path
+    checkpoint = checkpoint.resolve()
+    if not checkpoint.exists():
+        raise FileNotFoundError(f"{field_name} not found: {checkpoint}")
+    return checkpoint
+
+
+def _mdeepcorr_cascade_logits(stage1_logits, stage2_logits, threshold: float, torch_module):
+    """Return logits whose sigmoid exactly matches Work1's two-stage score."""
+
+    stage1_scores = torch_module.sigmoid(stage1_logits)
+    stage2_scores = torch_module.sigmoid(stage2_logits)
+    final_scores = torch_module.where(stage1_scores > threshold, stage2_scores, stage1_scores)
+    epsilon = torch_module.finfo(final_scores.dtype).eps
+    return torch_module.logit(final_scores.clamp(min=epsilon, max=1.0 - epsilon))
 
 
 def _prepare_deepcorr_flow_torch(

@@ -1,15 +1,55 @@
 {
+  // ============================================================================
+  // 【日常运行区】只修改运行模式、GPU、实验名和断点。
+  // ============================================================================
   "run_mode": "train",
-  "visible_gpu_devices": "0,1",
+  "visible_gpu_devices": "2,3",
   "python_executable": "/home/xilin/anaconda3/envs/deepcorr/bin/python",
-  "resume_from_checkpoint": "",
   "model_id": "second_workpoint_deepcoffea_full",
+  "resume_from_checkpoint": "",
+
+  // ============================================================================
+  // 【主要调参区】DeepCoFFEA 按 session 窗口在线训练。
+  // ============================================================================
+  "train_epochs": 20,
+  "batch_size": 4,
+  "gradient_accumulation_steps": 1,
+  "training_drop_last": true,
+  "learning_rate": 0.001,
+  "learning_rate_decay": 1.0,
+  "lradj": "constant",
+  "patience": 100,
+  "max_grad_norm": 1.0,
+  "beta": 1.0,
+  "alpha": 1.5,
+  "gamma": 0.1,
+  "trainable_width": 128,
+  "n_heads": 4,
+  "visual_conv_channels": 8,
+  "reprogramming_num_prototypes": 32,
+  "semantic_alignment_mode": "text_prototypes",
+  "use_temporal_branch": true,
+  "use_visual_branch": true,
+  "use_prompt_text": true,
+
+  // ============================================================================
+  // 【DeepCoFFEA 协议区】冻结双塔，Tor 侧受扰动，Exit 侧保持原始配对。
+  // ============================================================================
   "model": "SecondWorkpointTorchRealModel",
   "target_model": "Deepcoffea",
+  "target_model_mode": "torch",
+  "target_model_root": "target_model",
   "target_model_path": "target_model/deepcoffea/deepcoffea_d3_ws5_nw11_thr20_tl500_el800_nt1000_ap1e-01_es64_lr1e-03_mep100000_bs256/best_loss.pth",
+  "target_model_dropout": 0.0,
+  "deepcoffea_similarity_margin": -0.5,
+  "deepcoffea_similarity_threshold": 0.2,
+  "deepcoffea_tor_len": 500,
+  "deepcoffea_exit_len": 800,
   "data": "DeepCoFFEA",
+  "data_loader": "real",
   "data_path": "datasets/deepcoffea/CrawlE_Proc/filtered_and_partitioned",
   "deepcoffea_prefix": "d3_ws5_nw11_thr20_tl500_el800_nt1000",
+  "deepcoffea_include_tail": true,
   "flow_size": 220,
   "seq_len": 150,
   "pred_len": 70,
@@ -20,19 +60,29 @@
   "size_channel_indices": [1],
   "eval_split": "test",
   "final_eval_split": "test",
-  "train_epochs": 20,
-  "batch_size": 4,
   "negative_pairs_per_sample": 10,
-  "learning_rate": 0.001,
-  "beta": 1.0,
-  "alpha": 1.5,
-  "gamma": 0.1,
-  "deepcoffea_similarity_margin": -0.5,
-  "deepcoffea_similarity_threshold": 0.2,
+  "evaluation_negative_batch_size": 256,
+  "report_fpr_targets": [0.001, 0.0001],
+
+  // ============================================================================
+  // 【资源区】第一张逻辑卡放 Qwen，第二张放 Work2 和 DeepCoFFEA 双塔。
+  // ============================================================================
+  "checkpoints": "vista_augur/outputs/checkpoints",
+  "backbone_mode": "hf_frozen",
   "backbone_model_name": "Qwen/Qwen2.5-1.5B-Instruct",
   "backbone_model_path": "base_models/Qwen2.5-1.5B-Instruct",
+  "backbone_dtype": "float16",
+  "backbone_quantization": "none",
+  "backbone_prompt_max_tokens": 64,
   "backbone_device": "cuda:0",
   "trainable_device": "cuda:1",
   "target_device": "cuda:1",
-  "semantic_alignment_mode": "text_prototypes"
+  "adv_type": "time_and_size",
+  "backend": "torch_real",
+  "max_train_samples": 0,
+  "max_eval_samples": 0,
+  "max_train_steps": 0,
+  "max_eval_steps": 0,
+  "log_interval": 100,
+  "num_workers": 0
 }

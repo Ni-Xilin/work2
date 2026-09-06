@@ -43,6 +43,11 @@ class ExperimentConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "evaluation_negative_batch_size"):
             config.validate()
 
+    def test_rejects_invalid_mdeepcorr_stage1_threshold(self):
+        config = self.make_config(mdeepcorr_stage1_threshold=1.0)
+        with self.assertRaisesRegex(ValueError, "mdeepcorr_stage1_threshold"):
+            config.validate()
+
     def test_loads_commented_json_config(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "experiment.jsonc"

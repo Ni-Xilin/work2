@@ -1,14 +1,14 @@
 # 配置文件说明
 
-本目录只保留当前 Work2 主线和两个后续跨攻击模型验证所需的配置。日常 DeepCorr300 训练与调参只编辑第一份 JSONC；其余两份是后续扩展预设，不阻塞当前主线。
+本目录分别保存 DeepCorr300、m-DeepCorr 和 DeepCoFFEA 三个 Work2 目标的独立配置。三个启动脚本各自绑定一份配置，避免误用目标权重或覆盖其他实验目录。
 
 ## 配置一览
 
 | 文件 | 用途 | 当前定位 |
 | --- | --- | --- |
-| `second_workpoint_deepcorr300_work1_aligned.jsonc` | 使用冻结 DeepCorr300 反馈训练 Work2 生成器，并按 Work1 的数据划分和评估协议执行最终测试 | 当前唯一正式主线配置 |
-| `second_workpoint_mdeepcorr_full.json` | 将冻结目标模型切换为 m-DeepCorr，用于后续兼容性训练或验证 | 扩展预设，尚未执行正式实验 |
-| `second_workpoint_deepcoffea_full.json` | 将数据和冻结目标模型切换为 DeepCoFFEA，用于后续跨攻击模型验证 | 扩展预设，尚未执行正式实验 |
+| `second_workpoint_deepcorr300_work1_aligned.jsonc` | 使用冻结 DeepCorr300 反馈训练 Work2 生成器，并按 Work1 的数据划分和评估协议执行最终测试 | 已完成的 DeepCorr 主线 |
+| `second_workpoint_mdeepcorr_full.json` | 使用冻结 DeepCorr100 筛选和冻结 DeepCorr700 复判组成的两阶段目标反馈 | m-DeepCorr 主线 |
+| `second_workpoint_deepcoffea_full.json` | 使用冻结 Anchor/PandN 双塔和真实 Tor/Exit 配对反馈 | DeepCoFFEA 主线 |
 
 ## 当前主线配置
 
@@ -23,7 +23,7 @@
 
 ```bash
 cd /home/xilin/work2
-./run_work2.sh
+./run_work2_deepcorr.sh
 ```
 
 新训练使用：
@@ -37,16 +37,16 @@ cd /home/xilin/work2
 
 每个 epoch 的完整 checkpoint 使用 `generator_epNNN_origrecX_advrecX_lossX_timeX_sizeX.pt` 命名；`latest.pt` 和 `best.pt` 仍作为稳定的恢复入口。其中 `origrec` 与 `advrec` 是训练期正样本验证 Recall，不是 Precision 或整体 Accuracy。
 
-## 扩展配置
+## m-DeepCorr 与 DeepCoFFEA
 
-m-DeepCorr 和 DeepCoFFEA 配置可以通过同一个启动器显式运行：
+m-DeepCorr 与 DeepCoFFEA 使用独立的一键入口：
 
 ```bash
-./run_work2.sh vista_augur/configs/second_workpoint_mdeepcorr_full.json
-./run_work2.sh vista_augur/configs/second_workpoint_deepcoffea_full.json
+./run_work2_mdeepcorr.sh
+./run_work2_deepcoffea.sh
 ```
 
-这两份配置目前只是后续验证入口，其 batch size、损失权重和负样本数量尚未声明为与 Work1 完全对齐的正式协议。在真正运行前，应先根据对应攻击模型的原始训练与评估代码复核，而不能直接用于论文结论。
+m-DeepCorr 配置同时声明 DC100、DC700 权重和第一阶段阈值；不得退化为只加载 DC700。DeepCoFFEA 配置同时声明双塔权重、Tor/Exit 长度、余弦 margin 与阈值。两份文件都支持 `//` 注释，并用分隔线标出了日常运行区、调参区、协议区和资源区。
 
 ## 已删除的旧配置
 
