@@ -68,6 +68,16 @@ class ExperimentConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "explicit mdeepcorr100_model_path"):
             config.validate()
 
+    def test_mdeepcorr_config_uses_dedicated_deepcorr700_checkpoint_root(self):
+        config_path = Path(__file__).parents[1] / "configs" / "mdeepcorr_config.jsonc"
+        source = config_path.read_text(encoding="utf-8")
+        self.assertIn('"checkpoints": "vista_augur/outputs/checkpoint_deepcorr700"', source)
+
+    def test_deepcorr_config_uses_dedicated_deepcorr300_checkpoint_root(self):
+        config_path = Path(__file__).parents[1] / "configs" / "deepcorr_config.jsonc"
+        source = config_path.read_text(encoding="utf-8")
+        self.assertIn('"checkpoints": "vista_augur/outputs/checkpoint_deepcorr300"', source)
+
     def test_loads_commented_json_config(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "experiment.jsonc"

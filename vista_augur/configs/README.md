@@ -10,6 +10,14 @@
 | `mdeepcorr_config.jsonc` | 使用冻结 DeepCorr100 筛选和冻结 DeepCorr700 复判组成的两阶段目标反馈 | m-DeepCorr 主线 |
 | `deepcoffea_config.jsonc` | 使用冻结 Anchor/PandN 双塔和真实 Tor/Exit 配对反馈 | DeepCoFFEA 主线 |
 
+DeepCorr300 和 mDeepCorr 使用相互独立的后续输出位置：
+
+- DeepCorr300：`vista_augur/outputs/checkpoint_deepcorr300/`
+- mDeepCorr（训练反馈模型为 DeepCorr700）：`vista_augur/outputs/checkpoint_deepcorr700/`
+
+这些配置只决定后续运行的保存位置，不会移动、重命名或删除已经生成的 checkpoint 目录。
+如果需要恢复旧目录中的训练，`resume_from_checkpoint` 必须填写旧 `latest.pt` 的完整路径；简写 `latest` 会从新的目标目录查找。
+
 ## 当前主线配置
 
 三份 `*_config.jsonc` 文件分别对应三个目标模型。它们支持 `//` 中文注释，并已用分隔线划分以下区域：

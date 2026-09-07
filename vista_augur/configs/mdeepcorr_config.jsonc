@@ -105,7 +105,8 @@
   "data": "mDeepcorr",
   "data_loader": "real",
   "data_path": "datasets/deepcorr",
-  "checkpoints": "vista_augur/outputs/checkpoints",
+  // mDeepCorr 训练阶段由冻结 DeepCorr700 提供反馈，权重单独保存到该目录。
+  "checkpoints": "vista_augur/outputs/checkpoint_deepcorr700",
   "backbone_mode": "hf_frozen",
   "backbone_model_name": "Qwen/Qwen2.5-1.5B-Instruct",
   "backbone_model_path": "base_models/Qwen2.5-1.5B-Instruct",
