@@ -1,0 +1,17 @@
+{
+  "base_dir": "..",
+  "figures": [
+    {
+      "name": "main ROC figure",
+      "type": "roc",
+      "inputs": ["data/results/work2_deepcorr.summary.json"],
+      "options": {"output": "plot/results/main_roc.pdf", "min_fpr": 0.0001}
+    },
+    {
+      "name": "low-FPR metrics",
+      "type": "operating_points",
+      "inputs": ["data/results/work2_deepcorr.summary.json"],
+      "options": {"output": "plot/results/operating_points.pdf", "fpr": "fpr_1e-04"}
+    }
+  ]
+}

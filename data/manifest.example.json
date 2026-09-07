@@ -1,0 +1,14 @@
+{
+  "base_dir": "..",
+  "experiments": [
+    {
+      "name": "work2-deepcorr",
+      "target": "DeepCorr",
+      "method": "Work2",
+      "artifact": "vista_augur/outputs/checkpoints/REPLACE_WITH_RUN/evaluation_scores.npz",
+      "fpr_targets": [0.001, 0.0001],
+      "bootstrap": 1000,
+      "seed": 2025
+    }
+  ]
+}

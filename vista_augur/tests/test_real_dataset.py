@@ -20,10 +20,11 @@ from second_workpoint.data.real_dataset import (
 
 
 class DeepCoffeaDatasetTests(unittest.TestCase):
-    def test_returns_the_real_paired_exit_window(self):
+    def test_returns_one_session_with_work1_partitioned_target_windows(self):
         with tempfile.TemporaryDirectory() as directory:
             prefix = "fixture"
-            path = Path(directory) / f"{prefix}_test_session.npz"
+            session_path = Path(directory) / f"{prefix}_test_session.npz"
+            window_path = Path(directory) / f"{prefix}_test.npz"
             values = np.asarray(
                 [
                     np.arange(10, dtype=np.float32),
@@ -32,12 +33,20 @@ class DeepCoffeaDatasetTests(unittest.TestCase):
                 dtype=object,
             )
             np.savez(
-                path,
+                session_path,
                 tor_ipds=values,
                 tor_sizes=values + 1,
                 exit_ipds=values + 2,
                 exit_sizes=values + 3,
                 labels=np.asarray(["paired-flow", "negative-flow"]),
+            )
+            test_tor = np.arange(2 * 2 * 16, dtype=np.float32).reshape(2, 2, 16)
+            test_exit = np.arange(2 * 2 * 18, dtype=np.float32).reshape(2, 2, 18) + 1000
+            np.savez(
+                window_path,
+                test_tor=test_tor,
+                test_exit=test_exit,
+                test_label=np.asarray([["paired-flow", "negative-flow"]] * 2),
             )
             config = ExperimentConfig(
                 data="DeepCoFFEA",
@@ -55,18 +64,24 @@ class DeepCoffeaDatasetTests(unittest.TestCase):
                 deepcoffea_include_tail=False,
                 deepcoffea_tor_len=8,
                 deepcoffea_exit_len=9,
+                deepcoffea_n_windows=2,
+                deepcoffea_vote_threshold=2,
                 backbone_model_path="",
             )
             dataset = DeepCoffeaRealDataset(config, split="eval")
             sample = dataset[0]
-            self.assertEqual(sample["target_full_flow"].shape, (2, 8))
-            self.assertEqual(sample["target_exit_flow"].shape, (2, 9))
-            self.assertEqual(sample["target_negative_exit_flow"].shape, (1, 2, 9))
-            np.testing.assert_allclose(sample["target_full_flow"][0], np.arange(10, dtype=np.float32)[:8])
-            np.testing.assert_allclose(sample["target_exit_flow"][0], np.arange(10, dtype=np.float32)[:9] + 2)
+            self.assertEqual(len(dataset), 2)
+            self.assertEqual(sample["full_flow"].shape, (2, 10))
+            self.assertEqual(sample["history_seq"].shape, (3, 2, 4))
+            self.assertEqual(sample["clean_future"].shape, (3, 2, 2))
+            self.assertEqual(sample["target_tor_windows"].shape, (2, 16))
+            self.assertEqual(sample["target_exit_windows"].shape, (2, 18))
+            self.assertEqual(sample["target_negative_exit_windows"].shape, (1, 2, 18))
+            np.testing.assert_allclose(sample["target_tor_windows"], test_tor[:, 0])
+            np.testing.assert_allclose(sample["target_exit_windows"], test_exit[:, 0])
             np.testing.assert_allclose(
-                sample["target_negative_exit_flow"][0, 0],
-                np.arange(10, dtype=np.float32)[:9] + 102,
+                sample["target_negative_exit_windows"][0],
+                test_exit[:, 1],
             )
             self.assertEqual(sample["label_text"], "paired-flow")
 

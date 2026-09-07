@@ -55,6 +55,14 @@ class ExperimentConfig:
     # DeepCoFFEA similarity settings inherited from the first work point.
     deepcoffea_similarity_margin: float = -0.5
     deepcoffea_similarity_threshold: float = 0.2
+    # Work1 DeepCoFFEA partitions each session into overlapping time windows.
+    deepcoffea_delta_seconds: float = 3.0
+    deepcoffea_window_seconds: float = 5.0
+    deepcoffea_n_windows: int = 11
+    deepcoffea_vote_threshold: int = 9
+    deepcoffea_partition_steepness: float = 10.0
+    # Number of generator windows sent through Qwen at once; 0 disables chunking.
+    deepcoffea_generator_window_batch_size: int = 0
     # backbone 加载模式；当前只支持冻结的 Hugging Face backbone。
     backbone_mode: str = "hf_frozen"
     # backbone 的 Hugging Face 仓库名，作为本地路径不可用时的后备来源。
@@ -65,6 +73,8 @@ class ExperimentConfig:
     backbone_dtype: str = "float16"
     # backbone 量化模式；none 表示不量化，4bit/8bit 用于低显存 bring-up。
     backbone_quantization: str = "none"
+    # Recompute frozen Qwen activations during backward to reduce GPU memory.
+    backbone_activation_checkpointing: bool = False
     # 冻结 backbone 放置的设备。
     backbone_device: str = "cuda:0"
     # 冻结 backbone 的第二设备；为空表示 backbone 不做分层切卡。
@@ -277,6 +287,16 @@ class ExperimentConfig:
             raise ValueError("deepcoffea_similarity_threshold must be in [-1, 1].")
         if self.deepcoffea_similarity_margin >= self.deepcoffea_similarity_threshold:
             raise ValueError("deepcoffea_similarity_margin must be lower than the decision threshold.")
+        if self.deepcoffea_delta_seconds < 0 or self.deepcoffea_window_seconds <= self.deepcoffea_delta_seconds:
+            raise ValueError("DeepCoFFEA requires 0 <= delta_seconds < window_seconds.")
+        if self.deepcoffea_n_windows <= 0:
+            raise ValueError("deepcoffea_n_windows must be positive.")
+        if not 1 <= self.deepcoffea_vote_threshold <= self.deepcoffea_n_windows:
+            raise ValueError("deepcoffea_vote_threshold must be in [1, deepcoffea_n_windows].")
+        if self.deepcoffea_partition_steepness <= 0:
+            raise ValueError("deepcoffea_partition_steepness must be positive.")
+        if self.deepcoffea_generator_window_batch_size < 0:
+            raise ValueError("deepcoffea_generator_window_batch_size cannot be negative.")
         if self.eval_split not in {"val", "test"} or self.final_eval_split not in {"val", "test"}:
             raise ValueError("eval_split 和 final_eval_split 只支持 val 或 test。")
         if self.val_samples < 0 or self.test_samples < 0:

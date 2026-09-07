@@ -13,7 +13,7 @@
 
 Work2 分别支持 DeepCorr300、两阶段 m-DeepCorr 和 DeepCoFFEA 三个冻结攻击目标。三者使用独立配置和启动脚本，避免结果目录与运行参数混用。
 
-对于 DeepCorr300 和 m-DeepCorr，每个数据集样本代表一条完整流量。模型会先同时生成该流全部历史窗口对应的未来扰动，再将其全部写回完整流量，最后由冻结攻击模型给出训练反馈。DeepCoFFEA 因不同会话的窗口数不同，保留按窗口在线处理的主线。
+三个目标都以完整流量或完整 session 为一个 dataloader 样本。DeepCorr300 和 m-DeepCorr 在全部生成窗口写回后，把完整流量交给冻结目标；DeepCoFFEA 则在完整 Tor session 写回后，按 Work1 的 IPD 时间边界重新划分 11 个 Tor 窗口，再与预分区的配对 Exit 窗口逐窗计算冻结双塔反馈。
 
 ## 环境配置
 
@@ -68,7 +68,7 @@ bash run_work2_deepcorr.sh
 - `clean_*` 与 `adv_*` 的 Precision、Recall、F1、FPR：以真实匹配对作为正样本、确定性的跨会话错配作为负样本。
 - `operating_points`：分别从 clean 和 adversarial 负样本分数中校准论文使用的 `1e-3`、`1e-4` FPR 阈值。正式 DeepCorr 测试使用 1,000 个正样本和每个正样本 199 个负样本。
 - DeepCorr 使用第一工作点的概率阈值 `0.1`。
-- DeepCoFFEA 使用真实配对会话中的 500 包 Tor 窗口与 800 包 Exit 窗口，并使用余弦 margin hinge 损失；不会再用全零 Exit 输入替代真实流量。
+- DeepCoFFEA 使用每条 session 的 11 个真实配对窗口（Tor 500 包、Exit 800 包），训练损失为逐窗口余弦 margin hinge；评估按 Work1 的 9/11 投票得到 session 级判定，不使用全零 Exit 输入。
 
 ## 参考资料
 

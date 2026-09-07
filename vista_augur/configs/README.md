@@ -60,7 +60,19 @@ mDeepCorr 不得退化为只加载 DC700。其数据源沿用 Work1 的 `*_torda
 
 ## DeepCoFFEA 配置说明
 
-DeepCoFFEA 配置声明双塔权重、Tor/Exit 长度、余弦 margin 与判定阈值。目前代码仍在完善，正式训练前需要完成独立验证协议检查。
+DeepCoFFEA 已采用与 Work1 一致的 session 级训练协议：每个 dataloader 样本是一条完整 Tor session，Work2 对该 session 的全部生成窗口写回扰动后，再按 IPD 时间边界重新划分为 11 个 DeepCoFFEA Tor 窗口，并与 `*_train.npz` / `*_test.npz` 中预分区的配对 Exit 窗口逐窗计算余弦损失。
+
+- `deepcoffea_delta_seconds=3.0`、`deepcoffea_window_seconds=5.0`、`deepcoffea_n_windows=11`：控制 Work1 的重叠时间窗口协议。
+- `deepcoffea_vote_threshold=9`：评估时按 11 个窗口中至少 9 个通过阈值来判定 session 匹配。
+- `deepcoffea_similarity_margin=-0.5`、`beta=4.0`：对应 Work1 的负标签 `CosineEmbeddingLoss`。实现上等价为 `max(cosine_similarity - margin, 0)`。
+- `learning_rate=0.01`、`lradj=type4`：前两次 epoch 调度保持初始学习率，之后按 `0.7` 指数衰减。
+- `batch_size=1`、`gradient_accumulation_steps=16`：物理 batch 降为一条 session，有效 batch size 保持为 16，避免多条长 session 同时展开挤满 Qwen 所在显卡。
+- `deepcoffea_generator_window_batch_size=16`、`backbone_activation_checkpointing=true`：每次只向 Qwen 发送 16 个生成窗口，并在反向传播时重算冻结 Qwen 的激活，控制超长 session 的峰值显存。
+- 输出目录为 `vista_augur/outputs/checkpoint_deepcoffea/`，不会与 DeepCorr300 或 mDeepCorr checkpoint 混放。
+
+DeepCoFFEA 的 `max_train_steps=21` 对齐 Work1 中 `i > 19` 才停止的实际行为，即每个 epoch 处理 21 个随机 batch。设为 `0` 才会完整遍历 13097 条训练 session，但不建议在首次正式运行时直接启用。
+
+DeepCoFFEA 训练阶段同样对齐 Work1：每个 epoch 只汇总训练集上的余弦 hinge、时间 L2、大小 L2 和总损失，不调用 978 条测试 session 的完整评估，也不启用基于验证集的早停。每个 epoch 仍保存 `latest.pt` 和带 `ep/cos/loss/time/size` 的 checkpoint；`best.pt` 按训练总损失更新。需要完整测试时，将 `run_mode` 改为 `evaluate` 后单独运行启动脚本。
 
 ## 历史配置整理
 

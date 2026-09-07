@@ -5,10 +5,14 @@ import unittest
 try:
     import torch
 
-    from second_workpoint.models.target_model_adapter import _mdeepcorr_cascade_logits
+    from second_workpoint.models.target_model_adapter import (
+        _mdeepcorr_cascade_logits,
+        _prepare_deepcoffea_flat_flow_torch,
+    )
 except ImportError:  # pragma: no cover - local lightweight environments may omit torch
     torch = None
     _mdeepcorr_cascade_logits = None
+    _prepare_deepcoffea_flat_flow_torch = None
 
 
 @unittest.skipIf(torch is None, "PyTorch is not installed")
@@ -29,6 +33,17 @@ class MDeepCorrCascadeTests(unittest.TestCase):
         self.assertEqual(float(stage1_scores.grad[1]), 0.0)
         self.assertEqual(float(stage2_scores.grad[0]), 0.0)
         self.assertNotEqual(float(stage2_scores.grad[1]), 0.0)
+
+    def test_deepcoffea_accepts_prepartitioned_session_windows(self):
+        windows = torch.arange(2 * 11 * 1000, dtype=torch.float32).reshape(2, 11, 1000)
+        flattened = _prepare_deepcoffea_flat_flow_torch(
+            windows,
+            target_length=500,
+            torch_module=torch,
+            device=torch.device("cpu"),
+        )
+        self.assertEqual(tuple(flattened.shape), (22, 1000))
+        torch.testing.assert_close(flattened, windows.reshape(22, 1000))
 
 
 if __name__ == "__main__":

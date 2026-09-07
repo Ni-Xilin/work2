@@ -212,74 +212,93 @@ class DeepCoffeaRealDataset:
         self.data_dir = Path(config.data_path)
         self.file_split = "train" if self.split == "train" else "test"
         self.session_data = self._load_session_data()
-        self.window_specs = self._build_window_specs()
+        self.window_data = self._load_window_data()
+        session_count = len(self.session_data["labels"])
+        window_sample_count = int(self.window_data["tor"].shape[1])
+        if session_count != window_sample_count:
+            raise ValueError(
+                "DeepCoFFEA session/window files disagree on sample count: "
+                f"sessions={session_count}, windows={window_sample_count}"
+            )
+        limit = config.max_train_samples if self.split == "train" else config.max_eval_samples
+        selected_count = min(session_count, limit) if limit > 0 else session_count
+        self.sample_indices = np.arange(selected_count, dtype=np.int64)
+        if self.split == "test":
+            full_negative_map = _build_negative_index_map(
+                np.arange(session_count, dtype=np.int64),
+                config.negative_pairs_per_sample,
+                split_seed=config.split_seed,
+            )
+            self.negative_sample_indices = {
+                int(index): full_negative_map[int(index)] for index in self.sample_indices
+            }
+        else:
+            self.negative_sample_indices = {}
 
     def __len__(self) -> int:
-        return int(self.window_specs.shape[0])
+        return int(self.sample_indices.shape[0])
 
     def __getitem__(self, index: int) -> dict[str, np.ndarray]:
-        session_index, window_index, start = self.window_specs[int(index)].tolist()
+        session_index = int(self.sample_indices[int(index)])
         session = build_deepcoffea_session(
-            self.session_data["tor_ipds"][int(session_index)],
-            self.session_data["tor_sizes"][int(session_index)],
+            self.session_data["tor_ipds"][session_index],
+            self.session_data["tor_sizes"][session_index],
         )
-        exit_session = build_deepcoffea_session(
-            self.session_data["exit_ipds"][int(session_index)],
-            self.session_data["exit_sizes"][int(session_index)],
+        starts = iter_window_starts(
+            total_length=int(session.shape[1]),
+            seq_len=self.config.seq_len,
+            pred_len=self.config.pred_len,
+            stride=self.config.stride,
+            include_tail=self.config.deepcoffea_include_tail,
         )
+        if not starts:
+            raise ValueError(f"DeepCoFFEA session {session_index} is too short for generator history.")
         raw_length = int(session.shape[1])
-        history_seq = session[:, start : start + self.config.seq_len].copy()
-
-        future_start = start + self.config.seq_len
-        future_end = future_start + self.config.pred_len
-        clean_future_raw = session[:, future_start:future_end].copy()
-        future_valid_length = int(clean_future_raw.shape[1])
-        clean_future = np.zeros((self.config.enc_in, self.config.pred_len), dtype=np.float32)
-        clean_future[:, :future_valid_length] = clean_future_raw
-
-        full_flow = np.concatenate([history_seq, clean_future], axis=1).astype(np.float32)
-        sample = build_sample_views(
-            config=self.config,
-            dataset_name=self.dataset_name,
-            history_seq=history_seq,
-            clean_future=clean_future,
-            full_flow=full_flow,
-            sample_index=int(session_index),
-            window_index=int(window_index),
-            window_start=int(start),
-            writeback_start=self.config.seq_len,
-            raw_length=raw_length,
-            future_valid_length=future_valid_length,
-        )
-        sample["label_text"] = str(self.session_data["labels"][int(session_index)])
-        sample["target_full_flow"] = _fixed_session_window(
-            session,
-            start=start,
-            target_length=self.config.deepcoffea_tor_len,
-        )
-        sample["target_exit_flow"] = _fixed_session_window(
-            exit_session,
-            start=start,
-            target_length=self.config.deepcoffea_exit_len,
-        )
-        negative_exit_windows = []
-        session_count = len(self.session_data["labels"])
-        for offset in range(1, self.config.negative_pairs_per_sample + 1):
-            negative_session_index = (int(session_index) + offset) % session_count
-            negative_exit_session = build_deepcoffea_session(
-                self.session_data["exit_ipds"][negative_session_index],
-                self.session_data["exit_sizes"][negative_session_index],
-            )
-            negative_exit_windows.append(
-                _fixed_session_window(
-                    negative_exit_session,
-                    start=start,
-                    target_length=self.config.deepcoffea_exit_len,
+        windows = []
+        for window_index, start in enumerate(starts):
+            history_seq = session[:, start : start + self.config.seq_len].copy()
+            future_start = start + self.config.seq_len
+            clean_future_raw = session[:, future_start : future_start + self.config.pred_len].copy()
+            future_valid_length = int(clean_future_raw.shape[1])
+            clean_future = np.zeros((self.config.enc_in, self.config.pred_len), dtype=np.float32)
+            clean_future[:, :future_valid_length] = clean_future_raw
+            windows.append(
+                build_sample_views(
+                    config=self.config,
+                    dataset_name=self.dataset_name,
+                    history_seq=history_seq,
+                    clean_future=clean_future,
+                    full_flow=session,
+                    sample_index=session_index,
+                    window_index=window_index,
+                    window_start=int(start),
+                    writeback_start=int(future_start),
+                    raw_length=raw_length,
+                    future_valid_length=future_valid_length,
                 )
             )
-        sample["target_negative_exit_flow"] = np.stack(negative_exit_windows, axis=0)
-        sample["sample_key"] = f"{self.dataset_name}:{session_index}:{window_index}"
-        sample["session_length"] = np.asarray(raw_length, dtype=np.int64)
+
+        sample = {
+            "dataset_protocol": "deepcoffea_session",
+            "full_flow": session.astype(np.float32),
+            "history_seq": np.stack([window["history_seq"] for window in windows], axis=0),
+            "clean_future": np.stack([window["clean_future"] for window in windows], axis=0),
+            "prompt_text": [str(window["prompt_text"]) for window in windows],
+            "future_mask": np.stack([window["future_mask"] for window in windows], axis=0),
+            "writeback_meta": np.stack([window["writeback_meta"] for window in windows], axis=0),
+            "target_tor_windows": self.window_data["tor"][:, session_index, :].astype(np.float32),
+            "target_exit_windows": self.window_data["exit"][:, session_index, :].astype(np.float32),
+            "label_text": str(self.session_data["labels"][session_index]),
+            "sample_key": f"{self.dataset_name}:{session_index}",
+        }
+        if self.split == "test":
+            sample["target_negative_exit_windows"] = np.stack(
+                [
+                    self.window_data["exit"][:, negative_index, :]
+                    for negative_index in self.negative_sample_indices[session_index]
+                ],
+                axis=0,
+            ).astype(np.float32)
         return sample
 
     def _load_session_data(self) -> dict[str, np.ndarray]:
@@ -287,46 +306,35 @@ class DeepCoffeaRealDataset:
         if not session_path.exists():
             raise FileNotFoundError(f"未找到 DeepCoFFEA session 文件: {session_path}")
         payload = np.load(session_path, allow_pickle=True)
-        required_keys = {"tor_ipds", "tor_sizes", "exit_ipds", "exit_sizes", "labels"}
+        required_keys = {"tor_ipds", "tor_sizes", "labels"}
         missing = required_keys.difference(payload.files)
         if missing:
             raise KeyError(f"DeepCoFFEA session 文件缺少字段: {sorted(missing)}")
         return {
             "tor_ipds": payload["tor_ipds"],
             "tor_sizes": payload["tor_sizes"],
-            "exit_ipds": payload["exit_ipds"],
-            "exit_sizes": payload["exit_sizes"],
             "labels": payload["labels"],
         }
 
-    def _build_window_specs(self) -> np.ndarray:
-        specs: list[tuple[int, int, int]] = []
-        session_count = len(self.session_data["labels"])
-        limit = self.config.max_train_samples if self.split == "train" else self.config.max_eval_samples
-        for session_index in range(session_count):
-            session = build_deepcoffea_session(
-                self.session_data["tor_ipds"][session_index],
-                self.session_data["tor_sizes"][session_index],
+    def _load_window_data(self) -> dict[str, np.ndarray]:
+        window_path = self.data_dir / f"{self.config.deepcoffea_prefix}_{self.file_split}.npz"
+        if not window_path.exists():
+            raise FileNotFoundError(f"DeepCoFFEA window file not found: {window_path}")
+        payload = np.load(window_path)
+        tor_key = f"{self.file_split}_tor"
+        exit_key = f"{self.file_split}_exit"
+        missing = {tor_key, exit_key}.difference(payload.files)
+        if missing:
+            raise KeyError(f"DeepCoFFEA window file is missing fields: {sorted(missing)}")
+        tor = payload[tor_key]
+        exit_flow = payload[exit_key]
+        expected = int(self.config.deepcoffea_n_windows)
+        if tor.shape[0] != expected or exit_flow.shape[0] != expected:
+            raise ValueError(
+                "DeepCoFFEA pre-partitioned window count does not match deepcoffea_n_windows: "
+                f"tor={tor.shape[0]}, exit={exit_flow.shape[0]}, configured={expected}"
             )
-            starts = iter_window_starts(
-                total_length=int(session.shape[1]),
-                seq_len=self.config.seq_len,
-                pred_len=self.config.pred_len,
-                stride=self.config.stride,
-                include_tail=self.config.deepcoffea_include_tail,
-            )
-            for window_index, start in enumerate(starts):
-                specs.append((session_index, window_index, int(start)))
-                if limit > 0 and len(specs) >= limit:
-                    return np.asarray(specs, dtype=np.int64)
-
-        if not specs:
-            raise ValueError("DeepCoFFEA session 切分后没有可用窗口。")
-
-        window_specs = np.asarray(specs, dtype=np.int64)
-        if limit > 0:
-            window_specs = window_specs[:limit]
-        return window_specs
+        return {"tor": tor, "exit": exit_flow}
 
 
 def _fixed_session_window(session: np.ndarray, start: int, target_length: int) -> np.ndarray:

@@ -16,6 +16,7 @@ import numpy as np
 from second_workpoint.config import ExperimentConfig
 from second_workpoint.data.factory import build_dataset
 from second_workpoint.models.target_model_adapter import build_target_model
+from second_workpoint.training.deepcoffea_protocol import aggregate_session_scores, partition_sessions_by_ipd
 from second_workpoint.training.losses import TargetedOverheadLoss
 from second_workpoint.training.metrics import summarize_scores, threshold_at_target_fpr
 from second_workpoint.utils.runtime import count_parameters, ensure_dir, import_torch, resolve_device, resolve_torch_device, save_json
@@ -35,7 +36,8 @@ class TorchTrainer:
         self.run_dir = ensure_dir(Path(config.checkpoints) / self.setting_name)
 
         self.train_dataset = build_dataset(config, split="train") if config.is_training else None
-        self.eval_dataset = build_dataset(config, split="eval")
+        skip_epoch_eval_dataset = config.is_training and "deepcoffea" in config.target_model.lower()
+        self.eval_dataset = None if skip_epoch_eval_dataset else build_dataset(config, split="eval")
 
         from torch.utils.data import DataLoader
         from second_workpoint.models import SecondWorkpointTorchRealModel
@@ -50,14 +52,16 @@ class TorchTrainer:
                 collate_fn=self._torch_collate_batch,
                 drop_last=config.training_drop_last,
             )
-        self.eval_loader = DataLoader(
-            self.eval_dataset,
-            batch_size=config.batch_size,
-            shuffle=False,
-            num_workers=config.num_workers,
-            collate_fn=self._torch_collate_batch,
-            drop_last=bool(config.is_training and config.training_drop_last),
-        )
+        self.eval_loader = None
+        if self.eval_dataset is not None:
+            self.eval_loader = DataLoader(
+                self.eval_dataset,
+                batch_size=config.batch_size,
+                shuffle=False,
+                num_workers=config.num_workers,
+                collate_fn=self._torch_collate_batch,
+                drop_last=bool(config.is_training and config.training_drop_last),
+            )
 
         self.model = SecondWorkpointTorchRealModel(config)
         self.target_model = build_target_model(config)
@@ -98,6 +102,15 @@ class TorchTrainer:
                     or reached_train_step_limit
                 )
                 if should_step:
+                    accumulated_steps = ((step - 1) % self.config.gradient_accumulation_steps) + 1
+                    if (
+                        "deepcoffea" in self.config.target_model.lower()
+                        and accumulated_steps < self.config.gradient_accumulation_steps
+                    ):
+                        correction = float(self.config.gradient_accumulation_steps) / float(accumulated_steps)
+                        for parameter in self.model.parameters():
+                            if parameter.requires_grad and parameter.grad is not None:
+                                parameter.grad.mul_(correction)
                     if self.config.max_grad_norm > 0:
                         self.torch.nn.utils.clip_grad_norm_(
                             [parameter for parameter in self.model.parameters() if parameter.requires_grad],
@@ -130,37 +143,64 @@ class TorchTrainer:
                     break
 
             train_summary = self._finalize_metrics(epoch_metrics)
-            # Work1 validates generator efficacy on matched positive pairs only.
-            # Negative-pair FPR calibration is reserved for standalone test evaluation.
-            eval_summary = self.evaluate(include_negatives=False)
+            work1_deepcoffea_training = self._uses_work1_deepcoffea_training_monitor()
+            if work1_deepcoffea_training:
+                # Work1 does not run its test loader after a DeepCoFFEA training
+                # epoch. It monitors the mean training cosine hinge and L2 rates.
+                eval_summary = None
+                monitor_summary = train_summary
+            else:
+                # DeepCorr/mDeepCorr retain their completed epoch-validation path.
+                eval_summary = self.evaluate(include_negatives=False)
+                monitor_summary = eval_summary
             history.append({"epoch": epoch, "train": train_summary, "eval": eval_summary})
-            print(
-                f"[epoch] {epoch} "
-                f"train_loss={train_summary['loss']:.4f} "
-                f"eval_loss={eval_summary['loss']:.4f} "
-                f"train_orig_positive={train_summary['original_positive_rate']:.4f} "
-                f"train_adv_positive={train_summary['adv_positive_rate']:.4f} "
-                f"eval_orig_positive={eval_summary['original_positive_rate']:.4f} "
-                f"eval_adv_positive={eval_summary['adv_positive_rate']:.4f} "
-                f"eval_positive_drop={eval_summary['positive_rate_drop']:.4f} "
-                f"train_asr={train_summary['attack_success_rate']:.4f} "
-                f"eval_asr={eval_summary['attack_success_rate']:.4f} "
-                f"train_flip={train_summary['flip_rate']:.4f} "
-                f"eval_flip={eval_summary['flip_rate']:.4f} "
-                f"eval_clean_f1={eval_summary['clean_f1']:.4f} "
-                f"eval_adv_f1={eval_summary['adv_f1']:.4f} "
-                f"train_adv_prob={train_summary['mean_adv_prob']:.4f} "
-                f"eval_adv_prob={eval_summary['mean_adv_prob']:.4f}"
-            )
-            improved = eval_summary["loss"] < self.best_eval_loss
+            if work1_deepcoffea_training:
+                print(
+                    f"[epoch] {epoch} "
+                    f"train_loss={train_summary['loss']:.4f} "
+                    f"cosine_loss={train_summary['label_loss']:.4f} "
+                    f"time={train_summary['time_ratio']:.4f} "
+                    f"size={train_summary['size_ratio']:.4f} "
+                    f"adv_similarity={train_summary['mean_adv_logit']:.4f}"
+                )
+            else:
+                print(
+                    f"[epoch] {epoch} "
+                    f"train_loss={train_summary['loss']:.4f} "
+                    f"eval_loss={eval_summary['loss']:.4f} "
+                    f"train_orig_positive={train_summary['original_positive_rate']:.4f} "
+                    f"train_adv_positive={train_summary['adv_positive_rate']:.4f} "
+                    f"eval_orig_positive={eval_summary['original_positive_rate']:.4f} "
+                    f"eval_adv_positive={eval_summary['adv_positive_rate']:.4f} "
+                    f"eval_positive_drop={eval_summary['positive_rate_drop']:.4f} "
+                    f"train_asr={train_summary['attack_success_rate']:.4f} "
+                    f"eval_asr={eval_summary['attack_success_rate']:.4f} "
+                    f"train_flip={train_summary['flip_rate']:.4f} "
+                    f"eval_flip={eval_summary['flip_rate']:.4f} "
+                    f"eval_clean_f1={eval_summary['clean_f1']:.4f} "
+                    f"eval_adv_f1={eval_summary['adv_f1']:.4f} "
+                    f"train_adv_prob={train_summary['mean_adv_prob']:.4f} "
+                    f"eval_adv_prob={eval_summary['mean_adv_prob']:.4f}"
+                )
+            improved = monitor_summary["loss"] < self.best_eval_loss
             if improved:
-                self.best_eval_loss = eval_summary["loss"]
+                self.best_eval_loss = monitor_summary["loss"]
                 self.epochs_without_improvement = 0
             else:
                 self.epochs_without_improvement += 1
-            self.scheduler.step()
-            self._save_checkpoint(epoch, train_summary, eval_summary, is_best=improved)
-            if self.config.patience > 0 and self.epochs_without_improvement >= self.config.patience:
+            self._step_learning_rate(epoch)
+            self._save_checkpoint(
+                epoch,
+                train_summary,
+                eval_summary,
+                is_best=improved,
+                monitor_summary=monitor_summary,
+            )
+            if (
+                not work1_deepcoffea_training
+                and self.config.patience > 0
+                and self.epochs_without_improvement >= self.config.patience
+            ):
                 print(f"[early-stop] no eval loss improvement for {self.config.patience} epochs")
                 break
 
@@ -173,7 +213,21 @@ class TorchTrainer:
         save_json(self.run_dir / "train_summary.json", summary)
         return summary
 
+    def _uses_work1_deepcoffea_training_monitor(self) -> bool:
+        return "deepcoffea" in self.config.target_model.lower()
+
+    def _step_learning_rate(self, completed_epoch: int) -> None:
+        if "deepcoffea" in self.config.target_model.lower() and self.config.lradj == "type4":
+            exponent = max(0, int(completed_epoch) - 2)
+            next_lr = float(self.config.learning_rate) * (0.7**exponent)
+            for parameter_group in self.optimizer.param_groups:
+                parameter_group["lr"] = next_lr
+            return
+        self.scheduler.step()
+
     def evaluate(self, include_negatives: bool = True) -> dict:
+        if self.eval_loader is None:
+            raise RuntimeError("Evaluation loader is unavailable during Work1-aligned DeepCoFFEA training.")
         self.model.eval()
         metrics = self._empty_metric_totals()
         score_buffers = {
@@ -194,9 +248,18 @@ class TorchTrainer:
                     break
         summary = self._finalize_metrics(metrics)
         summary["operating_points"] = self._build_operating_points(score_buffers)
+        if include_negatives and score_buffers["clean_negative_scores"]:
+            score_path = self.run_dir / "evaluation_scores.npz"
+            np.savez_compressed(
+                score_path,
+                **{name: np.asarray(values, dtype=np.float32) for name, values in score_buffers.items()},
+            )
+            summary["score_artifact"] = score_path.name
         return summary
 
     def _torch_collate_batch(self, samples):
+        if samples[0].get("dataset_protocol") == "deepcoffea_session":
+            return self._collate_deepcoffea_sessions(samples)
         batch = {}
         for key in samples[0]:
             values = [sample[key] for sample in samples]
@@ -217,7 +280,172 @@ class TorchTrainer:
             batch[key] = values
         return batch
 
+    def _collate_deepcoffea_sessions(self, samples):
+        variable_tensor_keys = {
+            "full_flow",
+            "history_seq",
+            "clean_future",
+            "future_mask",
+            "writeback_meta",
+        }
+        batch = {"dataset_protocol": "deepcoffea_session"}
+        for key in samples[0]:
+            if key == "dataset_protocol":
+                continue
+            values = [sample[key] for sample in samples]
+            if key in variable_tensor_keys:
+                batch[key] = [self.torch.from_numpy(value).float() for value in values]
+            elif key == "prompt_text":
+                batch[key] = values
+            elif isinstance(values[0], str):
+                batch[key] = [str(value) for value in values]
+            else:
+                stacked = np.stack(values, axis=0)
+                batch[key] = self.torch.from_numpy(stacked).float()
+        return batch
+
+    def _forward_deepcoffea_batch(self, batch, log_shapes: bool, include_negatives: bool = False):
+        sessions = [flow.to(self.trainable_device, dtype=self.torch.float32) for flow in batch["full_flow"]]
+        histories = [value.to(self.trainable_device, dtype=self.torch.float32) for value in batch["history_seq"]]
+        futures = [value.to(self.trainable_device, dtype=self.torch.float32) for value in batch["clean_future"]]
+        future_masks = [value.to(self.trainable_device, dtype=self.torch.float32) for value in batch["future_mask"]]
+        writeback = [value.to(self.trainable_device, dtype=self.torch.long) for value in batch["writeback_meta"]]
+        window_counts = [int(value.shape[0]) for value in histories]
+        history_seq = self.torch.cat(histories, dim=0)
+        clean_future = self.torch.cat(futures, dim=0)
+        future_mask = self.torch.cat(future_masks, dim=0)
+        writeback_meta = self.torch.cat(writeback, dim=0)
+        prompt_text = [text for session_prompts in batch["prompt_text"] for text in session_prompts]
+        window_owner = self.torch.cat(
+            [
+                self.torch.full((count,), owner, device=self.trainable_device, dtype=self.torch.long)
+                for owner, count in enumerate(window_counts)
+            ]
+        )
+
+        perturbation = self._generate_deepcoffea_perturbations(history_seq, prompt_text)
+        positive_delta = perturbation.abs() * future_mask.unsqueeze(-1)
+        channel_mask = self.torch.ones((self.config.enc_in,), device=self.trainable_device)
+        if self.config.adv_type == "time":
+            channel_mask[self.config.size_channel_indices] = 0.0
+        elif self.config.adv_type == "size":
+            channel_mask[self.config.time_channel_indices] = 0.0
+        positive_delta = positive_delta * channel_mask.view(1, 1, -1)
+        adv_future = self.torch.sign(clean_future) * (clean_future.abs() + positive_delta)
+
+        adv_sessions = [session.clone() for session in sessions]
+        for future_index in range(history_seq.shape[0]):
+            owner = int(window_owner[future_index].item())
+            start = int(writeback_meta[future_index, 0].item())
+            valid_length = int(writeback_meta[future_index, 1].item())
+            if valid_length > 0:
+                adv_sessions[owner][:, start : start + valid_length] = adv_future[
+                    future_index, :valid_length
+                ].transpose(0, 1)
+
+        original_flow, flow_mask = self._pad_deepcoffea_sessions(sessions)
+        adv_flow, _ = self._pad_deepcoffea_sessions(adv_sessions)
+        clean_tor_windows = batch["target_tor_windows"].to(self.trainable_device, dtype=self.torch.float32)
+        exit_windows = batch["target_exit_windows"].to(self.trainable_device, dtype=self.torch.float32)
+        with self.torch.no_grad():
+            original_window_logits = self.target_model.forward(clean_tor_windows, exit_flow=exit_windows).to(
+                self.trainable_device
+            )
+
+        adv_tor_windows = partition_sessions_by_ipd(
+            adv_sessions,
+            delta_seconds=self.config.deepcoffea_delta_seconds,
+            window_seconds=self.config.deepcoffea_window_seconds,
+            window_count=self.config.deepcoffea_n_windows,
+            packet_limit=self.config.deepcoffea_tor_len,
+            mask_steepness=self.config.deepcoffea_partition_steepness,
+        )
+        adv_window_logits = self.target_model.forward(adv_tor_windows, exit_flow=exit_windows).to(self.trainable_device)
+        target_labels = self.torch.zeros_like(adv_window_logits)
+        loss_outputs = self.criterion.forward(
+            target_logits=adv_window_logits,
+            target_labels=target_labels,
+            original_flow=original_flow,
+            adv_flow=adv_flow,
+            flow_mask=flow_mask,
+        )
+
+        batch_size = len(sessions)
+        original_session_scores = aggregate_session_scores(
+            original_window_logits.reshape(batch_size, self.config.deepcoffea_n_windows),
+            self.config.deepcoffea_vote_threshold,
+        )
+        adv_session_scores = aggregate_session_scores(
+            adv_window_logits.reshape(batch_size, self.config.deepcoffea_n_windows),
+            self.config.deepcoffea_vote_threshold,
+        )
+        metric_outputs = self._compute_attack_metrics(original_session_scores, adv_session_scores)
+        metric_outputs["mean_original_logit"] = float(original_window_logits.detach().mean().item())
+        metric_outputs["mean_adv_logit"] = float(adv_window_logits.detach().mean().item())
+        metric_outputs["mean_original_prob"] = metric_outputs["mean_original_logit"]
+        metric_outputs["mean_adv_prob"] = metric_outputs["mean_adv_logit"]
+        classification_outputs = self._compute_deepcoffea_classification_counts(
+            clean_tor_windows=clean_tor_windows,
+            adv_tor_windows=adv_tor_windows,
+            exit_windows=exit_windows,
+            negative_exit_windows=batch.get("target_negative_exit_windows"),
+            positive_original_scores=original_session_scores,
+            positive_adv_scores=adv_session_scores,
+            include_negatives=include_negatives,
+        )
+
+        if log_shapes:
+            print(
+                "[shape] deepcoffea_session "
+                f"sessions={batch_size} generator_windows={tuple(history_seq.shape)} "
+                f"target_windows={tuple(adv_tor_windows.shape)} logits={tuple(adv_window_logits.shape)}"
+            )
+
+        return {
+            "loss": loss_outputs["loss"],
+            "label_loss": float(loss_outputs["label_loss"].detach().item()),
+            "time_ratio": float(loss_outputs["time_ratio"].detach().item()),
+            "size_ratio": float(loss_outputs["size_ratio"].detach().item()),
+            **metric_outputs,
+            **classification_outputs,
+        }
+
+    def _generate_deepcoffea_perturbations(self, history_seq, prompt_text):
+        chunk_size = int(self.config.deepcoffea_generator_window_batch_size)
+        if chunk_size <= 0 or history_seq.shape[0] <= chunk_size:
+            return self.model.forward(history_seq=history_seq, prompt_text=prompt_text)["perturbation"]
+        chunks = []
+        for start in range(0, history_seq.shape[0], chunk_size):
+            end = min(start + chunk_size, history_seq.shape[0])
+            chunks.append(
+                self.model.forward(
+                    history_seq=history_seq[start:end],
+                    prompt_text=prompt_text[start:end],
+                )["perturbation"]
+            )
+        return self.torch.cat(chunks, dim=0)
+
+    def _pad_deepcoffea_sessions(self, sessions):
+        max_length = max(int(session.shape[1]) for session in sessions)
+        padded = []
+        masks = []
+        for session in sessions:
+            padding = max_length - int(session.shape[1])
+            padded.append(self.torch.nn.functional.pad(session, (0, padding)))
+            masks.append(
+                self.torch.nn.functional.pad(
+                    self.torch.ones(session.shape[1], device=session.device, dtype=session.dtype),
+                    (0, padding),
+                )
+            )
+        return self.torch.stack(padded, dim=0), self.torch.stack(masks, dim=0)
+
     def _forward_batch(self, batch, log_shapes: bool, include_negatives: bool = False):
+        if batch.get("dataset_protocol") == "deepcoffea_session":
+            return self._forward_deepcoffea_batch(batch, log_shapes, include_negatives)
+        return self._forward_standard_batch(batch, log_shapes, include_negatives)
+
+    def _forward_standard_batch(self, batch, log_shapes: bool, include_negatives: bool = False):
         full_flow = batch["full_flow"].to(self.trainable_device, dtype=self.torch.float32)
         history_seq = batch["history_seq"].to(self.trainable_device, dtype=self.torch.float32)
         clean_future = batch["clean_future"].to(self.trainable_device, dtype=self.torch.float32)
@@ -401,8 +629,24 @@ class TorchTrainer:
             f"target_channels={target_adv_flow.shape[1]} generated_channels={future_slice.shape[0]}"
         )
 
-    def _save_checkpoint(self, epoch: int, train_summary: dict, eval_summary: dict, is_best: bool) -> None:
-        checkpoint_prefix = self.run_dir / self._checkpoint_stem(epoch, eval_summary)
+    def _save_checkpoint(
+        self,
+        epoch: int,
+        train_summary: dict,
+        eval_summary: dict | None,
+        is_best: bool,
+        monitor_summary: dict | None = None,
+    ) -> None:
+        monitor = monitor_summary or eval_summary
+        if monitor is None:
+            raise ValueError("Checkpoint saving requires a train or evaluation monitor summary.")
+        if self._uses_work1_deepcoffea_training_monitor() and eval_summary is None:
+            checkpoint_stem = self._deepcoffea_checkpoint_stem(epoch, monitor)
+            monitor_source = "train"
+        else:
+            checkpoint_stem = self._checkpoint_stem(epoch, monitor)
+            monitor_source = "eval"
+        checkpoint_prefix = self.run_dir / checkpoint_stem
         save_json(
             checkpoint_prefix.with_suffix(".json"),
             {
@@ -410,6 +654,8 @@ class TorchTrainer:
                 "config": self.config.to_dict(),
                 "train_summary": train_summary,
                 "eval_summary": eval_summary,
+                "monitor_source": monitor_source,
+                "monitor_summary": monitor,
             },
         )
         payload = {
@@ -417,6 +663,8 @@ class TorchTrainer:
             "config": self.config.to_dict(),
             "train_summary": train_summary,
             "eval_summary": eval_summary,
+            "monitor_source": monitor_source,
+            "monitor_summary": monitor,
             "best_eval_loss": self.best_eval_loss,
             "epochs_without_improvement": self.epochs_without_improvement,
             "model_state": self._trainable_state_dict(),
@@ -439,6 +687,16 @@ class TorchTrainer:
             f"_loss{float(eval_summary['loss']):.4f}"
             f"_time{float(eval_summary['time_ratio']):.3f}"
             f"_size{float(eval_summary['size_ratio']):.3f}"
+        )
+
+    @staticmethod
+    def _deepcoffea_checkpoint_stem(epoch: int, train_summary: dict) -> str:
+        return (
+            f"generator_ep{epoch:03d}"
+            f"_cos{float(train_summary['mean_adv_logit']):.3f}"
+            f"_loss{float(train_summary['loss']):.4f}"
+            f"_time{float(train_summary['time_ratio']):.3f}"
+            f"_size{float(train_summary['size_ratio']):.3f}"
         )
 
     def _load_checkpoint(self, checkpoint_path: Path) -> None:
@@ -591,6 +849,70 @@ class TorchTrainer:
         if "deepcoffea" in self.config.target_model.lower():
             return logits, float(self.config.deepcoffea_similarity_threshold)
         return self.torch.sigmoid(logits), float(self.config.decision_threshold)
+
+    def _compute_deepcoffea_classification_counts(
+        self,
+        clean_tor_windows,
+        adv_tor_windows,
+        exit_windows,
+        negative_exit_windows,
+        positive_original_scores,
+        positive_adv_scores,
+        include_negatives: bool,
+    ) -> dict[str, int | list[float]]:
+        names = ("clean_tp", "clean_fp", "clean_tn", "clean_fn", "adv_tp", "adv_fp", "adv_tn", "adv_fn")
+        if not include_negatives:
+            return {
+                **{name: 0 for name in names},
+                "clean_positive_scores": [],
+                "clean_negative_scores": [],
+                "adv_positive_scores": [],
+                "adv_negative_scores": [],
+            }
+        if negative_exit_windows is None:
+            raise ValueError("DeepCoFFEA final evaluation requires deterministic mismatched Exit windows.")
+
+        negative_exit_windows = negative_exit_windows.to(self.trainable_device, dtype=self.torch.float32)
+        batch_size, negative_count, window_count, _ = negative_exit_windows.shape
+        repeated_clean = clean_tor_windows[:, None].expand(-1, negative_count, -1, -1)
+        repeated_adv = adv_tor_windows[:, None].expand(-1, negative_count, -1, -1)
+        flat_negative_exit = negative_exit_windows.reshape(-1, negative_exit_windows.shape[-1])
+        clean_negative_window_scores = self._target_forward_in_chunks(
+            repeated_clean.reshape(-1, repeated_clean.shape[-1]),
+            exit_flow=flat_negative_exit,
+        ).reshape(batch_size * negative_count, window_count)
+        adv_negative_window_scores = self._target_forward_in_chunks(
+            repeated_adv.reshape(-1, repeated_adv.shape[-1]),
+            exit_flow=flat_negative_exit,
+        ).reshape(batch_size * negative_count, window_count)
+        clean_negative_scores = aggregate_session_scores(
+            clean_negative_window_scores,
+            self.config.deepcoffea_vote_threshold,
+        )
+        adv_negative_scores = aggregate_session_scores(
+            adv_negative_window_scores,
+            self.config.deepcoffea_vote_threshold,
+        )
+        threshold = float(self.config.deepcoffea_similarity_threshold)
+
+        def counts(positive_scores, negative_scores, prefix: str) -> dict[str, int]:
+            positive_predictions = positive_scores.detach().reshape(-1) >= threshold
+            negative_predictions = negative_scores.detach().reshape(-1) >= threshold
+            return {
+                f"{prefix}_tp": int(positive_predictions.sum().item()),
+                f"{prefix}_fn": int((~positive_predictions).sum().item()),
+                f"{prefix}_fp": int(negative_predictions.sum().item()),
+                f"{prefix}_tn": int((~negative_predictions).sum().item()),
+            }
+
+        return {
+            **counts(positive_original_scores, clean_negative_scores, "clean"),
+            **counts(positive_adv_scores, adv_negative_scores, "adv"),
+            "clean_positive_scores": positive_original_scores.detach().float().cpu().tolist(),
+            "clean_negative_scores": clean_negative_scores.detach().float().cpu().tolist(),
+            "adv_positive_scores": positive_adv_scores.detach().float().cpu().tolist(),
+            "adv_negative_scores": adv_negative_scores.detach().float().cpu().tolist(),
+        }
 
     def _compute_classification_counts(
         self,

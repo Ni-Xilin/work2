@@ -105,6 +105,7 @@ if nn is not None:
             self.split_layer_index = int(getattr(config, "backbone_split_layer_index", 0))
             self.model_dtype = resolve_torch_dtype(str(getattr(config, "backbone_dtype", "float16")))
             self.quantization = str(getattr(config, "backbone_quantization", "none"))
+            self.activation_checkpointing = bool(getattr(config, "backbone_activation_checkpointing", False))
             self._create_causal_mask = create_causal_mask
             self._create_sliding_window_causal_mask = create_sliding_window_causal_mask
 
@@ -299,16 +300,34 @@ if nn is not None:
             )
             attention_mask = self._torch.cat([prompt_mask, token_mask], dim=1)
             if self.split_across_devices:
-                last_hidden_state = self._forward_split_backbone(context_embeddings, attention_mask)
+                forward_backbone = self._forward_split_backbone
             else:
-                outputs = self.model(
-                    inputs_embeds=context_embeddings,
-                    attention_mask=attention_mask,
-                    return_dict=True,
+                def forward_backbone(embeddings, mask):
+                    outputs = self.model(
+                        inputs_embeds=embeddings,
+                        attention_mask=mask,
+                        return_dict=True,
+                    )
+                    if not hasattr(outputs, "last_hidden_state"):
+                        raise RuntimeError("Qwen backbone did not return last_hidden_state.")
+                    return outputs.last_hidden_state
+
+            should_checkpoint = (
+                self.activation_checkpointing
+                and self._torch.is_grad_enabled()
+                and context_embeddings.requires_grad
+            )
+            if should_checkpoint:
+                from torch.utils.checkpoint import checkpoint
+
+                last_hidden_state = checkpoint(
+                    forward_backbone,
+                    context_embeddings,
+                    attention_mask,
+                    use_reentrant=False,
                 )
-                if not hasattr(outputs, "last_hidden_state"):
-                    raise RuntimeError("Qwen backbone did not return last_hidden_state.")
-                last_hidden_state = outputs.last_hidden_state
+            else:
+                last_hidden_state = forward_backbone(context_embeddings, attention_mask)
             conditioning_mask = self._torch.cat(
                 [
                     self._torch.zeros_like(prompt_mask),

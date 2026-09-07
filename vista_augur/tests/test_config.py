@@ -78,6 +78,13 @@ class ExperimentConfigTests(unittest.TestCase):
         source = config_path.read_text(encoding="utf-8")
         self.assertIn('"checkpoints": "vista_augur/outputs/checkpoint_deepcorr300"', source)
 
+    def test_deepcoffea_config_uses_work1_session_protocol(self):
+        config_path = Path(__file__).parents[1] / "configs" / "deepcoffea_config.jsonc"
+        source = config_path.read_text(encoding="utf-8")
+        self.assertIn('"checkpoints": "vista_augur/outputs/checkpoint_deepcoffea"', source)
+        self.assertIn('"deepcoffea_n_windows": 11', source)
+        self.assertIn('"deepcoffea_vote_threshold": 9', source)
+
     def test_loads_commented_json_config(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "experiment.jsonc"

@@ -299,8 +299,14 @@ def _prepare_deepcorr_flow_torch(
 
 def _prepare_deepcoffea_flat_flow_torch(adv_flow, target_length: int, torch_module, device):
     flow = adv_flow.to(device=device, dtype=torch_module.float32)
+    flat_length = target_length * 2
+    if flow.ndim >= 2 and flow.shape[-1] == flat_length:
+        return flow.reshape(-1, flat_length)
     if flow.ndim != 3:
-        raise ValueError(f"DeepCoFFEA target expects flow shape (batch, channels, length), got {tuple(flow.shape)}")
+        raise ValueError(
+            "DeepCoFFEA target expects (batch, 2, length) or pre-partitioned "
+            f"(..., {flat_length}) windows, got {tuple(flow.shape)}"
+        )
     if flow.shape[1] < 2:
         raise ValueError("DeepCoFFEA target expects at least ipd and size channels.")
     tor_flow = flow[:, :2, :]
