@@ -123,22 +123,32 @@ class TorchTrainer:
                 steps += 1
 
                 if step % self.config.log_interval == 0:
-                    print(
-                        f"[train] epoch={epoch} step={step} "
-                        f"loss={float(outputs['loss'].detach().item()):.4f} "
-                        f"label={outputs['label_loss']:.4f} "
-                        f"time={outputs['time_ratio']:.4f} "
-                        f"size={outputs['size_ratio']:.4f} "
-                        f"orig_positive={outputs['original_positive_rate']:.4f} "
-                        f"adv_positive={outputs['adv_positive_rate']:.4f} "
-                        f"positive_drop={outputs['positive_rate_drop']:.4f} "
-                        f"asr={outputs['attack_success_rate']:.4f} "
-                        f"flip={outputs['flip_rate']:.4f} "
-                        f"orig_logit={outputs['mean_original_logit']:.4f} "
-                        f"adv_logit={outputs['mean_adv_logit']:.4f} "
-                        f"orig_prob={outputs['mean_original_prob']:.4f} "
-                        f"adv_prob={outputs['mean_adv_prob']:.4f}"
-                    )
+                    if self._uses_work1_deepcoffea_training_monitor():
+                        print(
+                            f"[train] epoch={epoch} step={step} "
+                            f"loss={float(outputs['loss'].detach().item()):.4f} "
+                            f"cosine_loss={outputs['label_loss']:.4f} "
+                            f"time={outputs['time_ratio']:.4f} "
+                            f"size={outputs['size_ratio']:.4f} "
+                            f"adv_similarity={outputs['mean_adv_logit']:.4f}"
+                        )
+                    else:
+                        print(
+                            f"[train] epoch={epoch} step={step} "
+                            f"loss={float(outputs['loss'].detach().item()):.4f} "
+                            f"label={outputs['label_loss']:.4f} "
+                            f"time={outputs['time_ratio']:.4f} "
+                            f"size={outputs['size_ratio']:.4f} "
+                            f"orig_positive={outputs['original_positive_rate']:.4f} "
+                            f"adv_positive={outputs['adv_positive_rate']:.4f} "
+                            f"positive_drop={outputs['positive_rate_drop']:.4f} "
+                            f"asr={outputs['attack_success_rate']:.4f} "
+                            f"flip={outputs['flip_rate']:.4f} "
+                            f"orig_logit={outputs['mean_original_logit']:.4f} "
+                            f"adv_logit={outputs['mean_adv_logit']:.4f} "
+                            f"orig_prob={outputs['mean_original_prob']:.4f} "
+                            f"adv_prob={outputs['mean_adv_prob']:.4f}"
+                        )
                 if self.config.max_train_steps > 0 and steps >= self.config.max_train_steps:
                     break
 
@@ -345,12 +355,7 @@ class TorchTrainer:
 
         original_flow, flow_mask = self._pad_deepcoffea_sessions(sessions)
         adv_flow, _ = self._pad_deepcoffea_sessions(adv_sessions)
-        clean_tor_windows = batch["target_tor_windows"].to(self.trainable_device, dtype=self.torch.float32)
         exit_windows = batch["target_exit_windows"].to(self.trainable_device, dtype=self.torch.float32)
-        with self.torch.no_grad():
-            original_window_logits = self.target_model.forward(clean_tor_windows, exit_flow=exit_windows).to(
-                self.trainable_device
-            )
 
         adv_tor_windows = partition_sessions_by_ipd(
             adv_sessions,
@@ -371,6 +376,27 @@ class TorchTrainer:
         )
 
         batch_size = len(sessions)
+        if log_shapes:
+            print(
+                "[shape] deepcoffea_session "
+                f"sessions={batch_size} generator_windows={tuple(history_seq.shape)} "
+                f"target_windows={tuple(adv_tor_windows.shape)} logits={tuple(adv_window_logits.shape)}"
+            )
+        if self.config.is_training and not include_negatives:
+            return {
+                "loss": loss_outputs["loss"],
+                "label_loss": float(loss_outputs["label_loss"].detach().item()),
+                "time_ratio": float(loss_outputs["time_ratio"].detach().item()),
+                "size_ratio": float(loss_outputs["size_ratio"].detach().item()),
+                "batch_weight": batch_size,
+                "mean_adv_logit": float(adv_window_logits.detach().mean().item()),
+            }
+
+        clean_tor_windows = batch["target_tor_windows"].to(self.trainable_device, dtype=self.torch.float32)
+        with self.torch.no_grad():
+            original_window_logits = self.target_model.forward(clean_tor_windows, exit_flow=exit_windows).to(
+                self.trainable_device
+            )
         original_session_scores = aggregate_session_scores(
             original_window_logits.reshape(batch_size, self.config.deepcoffea_n_windows),
             self.config.deepcoffea_vote_threshold,
@@ -393,13 +419,6 @@ class TorchTrainer:
             positive_adv_scores=adv_session_scores,
             include_negatives=include_negatives,
         )
-
-        if log_shapes:
-            print(
-                "[shape] deepcoffea_session "
-                f"sessions={batch_size} generator_windows={tuple(history_seq.shape)} "
-                f"target_windows={tuple(adv_tor_windows.shape)} logits={tuple(adv_window_logits.shape)}"
-            )
 
         return {
             "loss": loss_outputs["loss"],
@@ -763,7 +782,7 @@ class TorchTrainer:
             "mean_original_prob",
             "mean_adv_prob",
         ):
-            value = outputs[name]
+            value = outputs.get(name, 0.0)
             if name == "loss":
                 value = value.detach().item()
             totals[name] += float(value) * weight
@@ -781,7 +800,7 @@ class TorchTrainer:
             "adv_tn",
             "adv_fn",
         ):
-            totals[name] += float(outputs[name])
+            totals[name] += float(outputs.get(name, 0.0))
 
     def _finalize_metrics(self, totals: dict[str, float]) -> dict[str, float]:
         weight = max(1.0, totals["weight"])

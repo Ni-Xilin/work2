@@ -3,7 +3,7 @@
   // 【日常运行区】只修改运行模式、GPU、实验名和断点。
   // ============================================================================
   "run_mode": "train",
-  "visible_gpu_devices": "2,3",
+  "visible_gpu_devices": "0,1",
   "python_executable": "/home/xilin/anaconda3/envs/deepcorr/bin/python",
   "model_id": "second_workpoint_deepcoffea_full",
   "resume_from_checkpoint": "",
@@ -12,15 +12,15 @@
   // 【主要调参区】DeepCoFFEA 按 session 窗口在线训练。
   // ============================================================================
   "train_epochs": 20,
-  "batch_size": 4,
-  "gradient_accumulation_steps": 1,
+  "batch_size": 1,
+  "gradient_accumulation_steps": 16,
   "training_drop_last": true,
-  "learning_rate": 0.001,
+  "learning_rate": 0.01,
   "learning_rate_decay": 1.0,
-  "lradj": "constant",
+  "lradj": "type4",
   "patience": 100,
   "max_grad_norm": 1.0,
-  "beta": 1.0,
+  "beta": 4.0,
   "alpha": 1.5,
   "gamma": 0.1,
   "trainable_width": 128,
@@ -45,6 +45,12 @@
   "deepcoffea_similarity_threshold": 0.2,
   "deepcoffea_tor_len": 500,
   "deepcoffea_exit_len": 800,
+  "deepcoffea_delta_seconds": 3.0,
+  "deepcoffea_window_seconds": 5.0,
+  "deepcoffea_n_windows": 11,
+  "deepcoffea_vote_threshold": 9,
+  "deepcoffea_partition_steepness": 10.0,
+  "deepcoffea_generator_window_batch_size": 16,
   "data": "DeepCoFFEA",
   "data_loader": "real",
   "data_path": "datasets/deepcoffea/CrawlE_Proc/filtered_and_partitioned",
@@ -67,12 +73,13 @@
   // ============================================================================
   // 【资源区】第一张逻辑卡放 Qwen，第二张放 Work2 和 DeepCoFFEA 双塔。
   // ============================================================================
-  "checkpoints": "vista_augur/outputs/checkpoints",
+  "checkpoints": "vista_augur/outputs/checkpoint_deepcoffea",
   "backbone_mode": "hf_frozen",
   "backbone_model_name": "Qwen/Qwen2.5-1.5B-Instruct",
   "backbone_model_path": "base_models/Qwen2.5-1.5B-Instruct",
   "backbone_dtype": "float16",
   "backbone_quantization": "none",
+  "backbone_activation_checkpointing": true,
   "backbone_prompt_max_tokens": 64,
   "backbone_device": "cuda:0",
   "trainable_device": "cuda:1",
@@ -81,7 +88,7 @@
   "backend": "torch_real",
   "max_train_samples": 0,
   "max_eval_samples": 0,
-  "max_train_steps": 0,
+  "max_train_steps": 21,
   "max_eval_steps": 0,
   "log_interval": 100,
   "num_workers": 0

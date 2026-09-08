@@ -35,6 +35,15 @@ class DeepCoffeaProtocolTests(unittest.TestCase):
 
         self.assertEqual(tuple(windows.shape), (1, 3, 8))
         torch.testing.assert_close(windows[0, :, 0], torch.zeros(3))
+        work1_mask = torch.sigmoid(torch.tensor([30.0, 20.0, 10.0, 0.0]))
+        expected_sizes = torch.stack(
+            [
+                torch.tensor([1.0, 2.0, 3.0, 4.0]) * work1_mask,
+                torch.tensor([3.0, 4.0, 5.0, 6.0]) * work1_mask,
+                torch.tensor([5.0, 6.0, 7.0, 8.0]) * work1_mask,
+            ]
+        )
+        torch.testing.assert_close(windows[0, :, 4:], expected_sizes)
         windows.sum().backward()
         self.assertGreater(float(session.grad.abs().sum()), 0.0)
 

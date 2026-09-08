@@ -40,7 +40,11 @@ class _FakeTarget:
 
 
 class _FakeDeepCoffeaTarget:
+    def __init__(self):
+        self.call_count = 0
+
     def forward(self, flow, exit_flow=None):
+        self.call_count += 1
         flat_flow = flow.reshape(-1, flow.shape[-1])
         return flat_flow.mean(dim=1, keepdim=True)
 
@@ -170,6 +174,9 @@ class GroupedTrainingTests(unittest.TestCase):
         outputs["loss"].backward()
 
         self.assertEqual(outputs["batch_weight"], 1)
+        self.assertEqual(trainer.target_model.call_count, 1)
+        self.assertNotIn("original_positive_rate", outputs)
+        self.assertNotIn("adv_positive_rate", outputs)
         self.assertEqual(trainer.model.call_sizes, [1, 1])
         self.assertGreater(float(trainer.model.last_perturbation.grad.abs().sum()), 0.0)
 
