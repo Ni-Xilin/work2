@@ -3,7 +3,7 @@
   // 【日常运行区】只修改运行模式、GPU、实验名和断点。
   // ============================================================================
   "run_mode": "train",
-  "visible_gpu_devices": "0,1",
+  "visible_gpu_devices": "2,3",
   "python_executable": "/home/xilin/anaconda3/envs/deepcorr/bin/python",
   "model_id": "second_workpoint_deepcoffea_full",
   "resume_from_checkpoint": "",
@@ -12,17 +12,18 @@
   // 【主要调参区】DeepCoFFEA 按 session 窗口在线训练。
   // ============================================================================
   "train_epochs": 20,
-  "batch_size": 1,
-  "gradient_accumulation_steps": 16,
+  "batch_size": 16,
+  "gradient_accumulation_steps": 1,
   "training_drop_last": true,
   "learning_rate": 0.01,
   "learning_rate_decay": 1.0,
   "lradj": "type4",
   "patience": 100,
   "max_grad_norm": 1.0,
-  "beta": 4.0,
-  "alpha": 1.5,
+  "beta": 1,
+  "alpha": 0.5,
   "gamma": 0.1,
+//===============================================================================
   "trainable_width": 128,
   "n_heads": 4,
   "visual_conv_channels": 8,
@@ -88,8 +89,8 @@
   "backend": "torch_real",
   "max_train_samples": 0,
   "max_eval_samples": 0,
-  "max_train_steps": 21,
+  "max_train_steps": 20,
   "max_eval_steps": 0,
-  "log_interval": 100,
+  "log_interval": 1,
   "num_workers": 0
 }

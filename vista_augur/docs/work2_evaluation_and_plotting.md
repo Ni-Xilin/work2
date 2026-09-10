@@ -24,7 +24,7 @@ adv_negative_scores
 
 The offline evaluator also accepts legacy Work1 pickle files containing `(all_outputs, all_labels)`, dictionaries containing `all_outputs` and `all_labels`, adaptive-attack dictionaries whose values use those two keys, and DeepCoFFEA correlation matrices.
 
-Every experiment is described in a JSON manifest. Copy `data/example_manifest.json`, replace the placeholder run path, and add one record per target, baseline, ablation, adaptive attack, or transfer experiment. The evaluator creates one `*.summary.json`, one `*.curves.npz`, and a shared `index.json`:
+Every experiment is described in a JSON manifest. Copy `data/manifest.example.json`, replace the placeholder run path, and add one record per target, baseline, ablation, adaptive attack, or transfer experiment. The evaluator creates one `*.summary.json`, one `*.curves.npz`, and a shared `index.json`:
 
 ```powershell
 python -m data.evaluate --manifest data/my_experiments.json --output-dir data/results
@@ -99,6 +99,8 @@ This separation follows the asynchronous deployment design in Work1: model infer
 ## 5. Figure inventory
 
 All plotting scripts use a non-interactive backend and save publication-ready PDF/SVG/PNG files.
+
+关于 `plot/` 下每个文件、输入格式、前置文件生成命令和当前限制的中文说明，见 [`plot_file_reference_zh.md`](plot_file_reference_zh.md)。
 
 | Paper purpose | Script | Input |
 | --- | --- | --- |

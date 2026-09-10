@@ -16,7 +16,11 @@ import numpy as np
 from second_workpoint.config import ExperimentConfig
 from second_workpoint.data.factory import build_dataset
 from second_workpoint.models.target_model_adapter import build_target_model
-from second_workpoint.training.deepcoffea_protocol import aggregate_session_scores, partition_sessions_by_ipd
+from second_workpoint.training.deepcoffea_protocol import (
+    aggregate_session_scores,
+    hard_partition_sessions_by_ipd,
+    partition_sessions_by_ipd,
+)
 from second_workpoint.training.losses import TargetedOverheadLoss
 from second_workpoint.training.metrics import summarize_scores, threshold_at_target_fpr
 from second_workpoint.utils.runtime import count_parameters, ensure_dir, import_torch, resolve_device, resolve_torch_device, save_json
@@ -127,10 +131,10 @@ class TorchTrainer:
                         print(
                             f"[train] epoch={epoch} step={step} "
                             f"loss={float(outputs['loss'].detach().item()):.4f} "
-                            f"cosine_loss={outputs['label_loss']:.4f} "
+                            f"cosine_hinge={outputs['label_loss']:.4f} "
                             f"time={outputs['time_ratio']:.4f} "
                             f"size={outputs['size_ratio']:.4f} "
-                            f"adv_similarity={outputs['mean_adv_logit']:.4f}"
+                            f"adv_cosine_plus_0.5={outputs['mean_adv_logit'] + 0.5:.4f}"
                         )
                     else:
                         print(
@@ -168,10 +172,10 @@ class TorchTrainer:
                 print(
                     f"[epoch] {epoch} "
                     f"train_loss={train_summary['loss']:.4f} "
-                    f"cosine_loss={train_summary['label_loss']:.4f} "
+                    f"cosine_hinge={train_summary['label_loss']:.4f} "
                     f"time={train_summary['time_ratio']:.4f} "
                     f"size={train_summary['size_ratio']:.4f} "
-                    f"adv_similarity={train_summary['mean_adv_logit']:.4f}"
+                    f"adv_cosine_plus_0.5={train_summary['mean_adv_logit'] + 0.5:.4f}"
                 )
             else:
                 print(
@@ -314,7 +318,13 @@ class TorchTrainer:
                 batch[key] = self.torch.from_numpy(stacked).float()
         return batch
 
-    def _forward_deepcoffea_batch(self, batch, log_shapes: bool, include_negatives: bool = False):
+    def _forward_deepcoffea_batch(
+        self,
+        batch,
+        log_shapes: bool,
+        include_negatives: bool = False,
+        collect_artifacts: bool = False,
+    ):
         sessions = [flow.to(self.trainable_device, dtype=self.torch.float32) for flow in batch["full_flow"]]
         histories = [value.to(self.trainable_device, dtype=self.torch.float32) for value in batch["history_seq"]]
         futures = [value.to(self.trainable_device, dtype=self.torch.float32) for value in batch["clean_future"]]
@@ -420,7 +430,7 @@ class TorchTrainer:
             include_negatives=include_negatives,
         )
 
-        return {
+        outputs = {
             "loss": loss_outputs["loss"],
             "label_loss": float(loss_outputs["label_loss"].detach().item()),
             "time_ratio": float(loss_outputs["time_ratio"].detach().item()),
@@ -428,6 +438,20 @@ class TorchTrainer:
             **metric_outputs,
             **classification_outputs,
         }
+        if collect_artifacts:
+            outputs["artifact_original_flow"] = original_flow.detach().float().cpu()
+            outputs["artifact_adv_flow"] = adv_flow.detach().float().cpu()
+            outputs["artifact_flow_mask"] = flow_mask.detach().float().cpu()
+            outputs["artifact_clean_tor_windows"] = clean_tor_windows.detach().float().cpu()
+            outputs["artifact_exit_windows"] = exit_windows.detach().float().cpu()
+            outputs["artifact_adv_tor_windows"] = hard_partition_sessions_by_ipd(
+                adv_sessions,
+                delta_seconds=self.config.deepcoffea_delta_seconds,
+                window_seconds=self.config.deepcoffea_window_seconds,
+                window_count=self.config.deepcoffea_n_windows,
+                packet_limit=self.config.deepcoffea_tor_len,
+            ).detach().float().cpu()
+        return outputs
 
     def _generate_deepcoffea_perturbations(self, history_seq, prompt_text):
         chunk_size = int(self.config.deepcoffea_generator_window_batch_size)
@@ -459,12 +483,24 @@ class TorchTrainer:
             )
         return self.torch.stack(padded, dim=0), self.torch.stack(masks, dim=0)
 
-    def _forward_batch(self, batch, log_shapes: bool, include_negatives: bool = False):
+    def _forward_batch(
+        self,
+        batch,
+        log_shapes: bool,
+        include_negatives: bool = False,
+        collect_artifacts: bool = False,
+    ):
         if batch.get("dataset_protocol") == "deepcoffea_session":
-            return self._forward_deepcoffea_batch(batch, log_shapes, include_negatives)
-        return self._forward_standard_batch(batch, log_shapes, include_negatives)
+            return self._forward_deepcoffea_batch(batch, log_shapes, include_negatives, collect_artifacts)
+        return self._forward_standard_batch(batch, log_shapes, include_negatives, collect_artifacts)
 
-    def _forward_standard_batch(self, batch, log_shapes: bool, include_negatives: bool = False):
+    def _forward_standard_batch(
+        self,
+        batch,
+        log_shapes: bool,
+        include_negatives: bool = False,
+        collect_artifacts: bool = False,
+    ):
         full_flow = batch["full_flow"].to(self.trainable_device, dtype=self.torch.float32)
         history_seq = batch["history_seq"].to(self.trainable_device, dtype=self.torch.float32)
         clean_future = batch["clean_future"].to(self.trainable_device, dtype=self.torch.float32)
@@ -602,7 +638,7 @@ class TorchTrainer:
                 f"logits={tuple(target_logits.shape)}"
             )
 
-        return {
+        outputs = {
             "loss": loss_outputs["loss"],
             "label_loss": float(loss_outputs["label_loss"].detach().item()),
             "time_ratio": float(loss_outputs["time_ratio"].detach().item()),
@@ -623,6 +659,13 @@ class TorchTrainer:
             "mean_original_prob": metric_outputs["mean_original_prob"],
             "mean_adv_prob": metric_outputs["mean_adv_prob"],
         }
+        if collect_artifacts:
+            outputs["artifact_original_flow"] = full_flow.detach().float().cpu()
+            outputs["artifact_adv_flow"] = adv_flow.detach().float().cpu()
+            outputs["artifact_target_original_flow"] = target_original_flow.detach().float().cpu()
+            outputs["artifact_target_adv_flow"] = target_adv_flow.detach().float().cpu()
+            outputs["artifact_flow_mask"] = flow_mask.detach().float().cpu()
+        return outputs
 
     def _write_target_future_torch(
         self,

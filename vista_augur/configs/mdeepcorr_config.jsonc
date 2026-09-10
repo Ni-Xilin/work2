@@ -30,17 +30,17 @@
   // 物理 batch 为 4，梯度累积 4 次，因此有效 batch 约为 16。
   "train_epochs": 20,
   "batch_size": 4,
-  "gradient_accumulation_steps": 4,
-  "learning_rate": 0.01,
-  "learning_rate_decay": 0.8,
+  "gradient_accumulation_steps": 1,
+  "learning_rate": 0.001,
+  "learning_rate_decay": 0.9,
   "lradj": "type3",
   "patience": 100,
   "max_grad_norm": 1.0,
 
   // 总损失：beta × 目标误导损失 + alpha × 时间开销 + gamma × 大小开销。
   "beta": 1.0,
-  "alpha": 0.75,
-  "gamma": 0.9,
+  "alpha": 4,
+  "gamma": 2,
 
   // Work2 可训练模块容量。trainable_width 必须能被 n_heads 整除。
   "trainable_width": 128,
@@ -124,6 +124,6 @@
   "max_eval_samples": 0,
   "max_train_steps": 0,
   "max_eval_steps": 0,
-  "log_interval": 100,
+  "log_interval": 80,
   "num_workers": 0
 }

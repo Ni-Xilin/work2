@@ -65,6 +65,56 @@ def partition_sessions_by_ipd(
     return torch.stack(partitioned, dim=0)
 
 
+def hard_partition_sessions_by_ipd(
+    sessions,
+    delta_seconds: float,
+    window_seconds: float,
+    window_count: int,
+    packet_limit: int,
+):
+    """Partition sessions exactly as Work1's formal DeepCoFFEA test path.
+
+    Unlike :func:`partition_sessions_by_ipd`, this routine is deliberately
+    non-differentiable.  It uses ``searchsorted(..., right=False)``, packs the
+    actual IPD slice directly before its size slice, and only then pads or
+    truncates the combined vector to ``2 * packet_limit``.
+    """
+
+    if not sessions:
+        raise ValueError("DeepCoFFEA partitioning requires at least one session.")
+    torch = _import_torch()
+    window_ms = float(window_seconds) * 1000.0
+    offset_ms = (float(window_seconds) - float(delta_seconds)) * 1000.0
+    partitioned = []
+
+    for session in sessions:
+        if session.ndim != 2 or session.shape[0] < 2:
+            raise ValueError(f"DeepCoFFEA session must have shape (2, length), got {tuple(session.shape)}")
+        if session.shape[1] == 0:
+            raise ValueError("DeepCoFFEA session cannot be empty.")
+        ipd = session[0]
+        size = session[1]
+        cumulative_time = ipd.abs().cumsum(dim=0)
+        windows = []
+        for window_index in range(int(window_count)):
+            start = float(window_index) * offset_ms
+            end = start + window_ms
+            start_index = int(torch.searchsorted(cumulative_time, start, right=False).item())
+            end_index = int(torch.searchsorted(cumulative_time, end, right=False).item())
+            window_ipd = ipd[start_index:end_index]
+            window_size = size[start_index:end_index]
+            if window_ipd.numel():
+                window_ipd = torch.cat((torch.zeros_like(window_ipd[:1]), window_ipd[1:]))
+            window = torch.cat((window_ipd, window_size))
+            target_length = int(packet_limit) * 2
+            if window.shape[0] < target_length:
+                window = torch.nn.functional.pad(window, (0, target_length - int(window.shape[0])))
+            windows.append(window[:target_length])
+        partitioned.append(torch.stack(windows, dim=0))
+
+    return torch.stack(partitioned, dim=0)
+
+
 def _work1_differentiable_searchsorted(torch):
     """Return the custom autograd search used verbatim by Work1's train path."""
 

@@ -39,6 +39,7 @@ Run commands from the repository root. The Python import root is `vista_augur/`.
 - Before deleting any local or remote file, directory, dataset, model weight, checkpoint, log, document, or generated artifact, present the exact deletion list and its recovery implications to the user and obtain explicit confirmation. A general cleanup request does not waive this confirmation requirement. Do not begin deletion while confirmation is pending.
 - Reuse existing modules and configuration fields before adding abstractions.
 - Do not add dependencies unless explicitly requested or technically unavoidable.
+- Keep verification minimal and proportional; do not add or run tests that are unnecessary for the requested change.
 - Keep the frozen Qwen backbone and frozen target model differentiable with respect to generator inputs.
 - Keep machine-specific paths, credentials, datasets, model weights, checkpoints, logs, caches, and PDFs out of Git.
 - Preserve unrelated user changes in a dirty worktree.
@@ -68,6 +69,8 @@ If end-to-end training cannot be run locally, state the missing environment or m
 ## Remote Experiments
 
 Local code may be synchronized to the experiment server and executed there. Keep local and remote directory layouts consistent, synchronize only intended files, avoid overwriting unrelated remote work, and bring back logs or summaries needed for analysis. Never store SSH passwords or other credentials in repository files.
+
+The experiment server is the source of truth for files under `vista_augur/configs/`. Before committing or pushing configuration changes, retrieve the current remote versions and use them to overwrite the corresponding local configuration files. Do not overwrite remote configuration files from the local workspace unless the user explicitly reverses this rule.
 
 Use the following connection profile for the current experiment server:
 

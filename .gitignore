@@ -35,6 +35,9 @@ base_models/
 
 # Training outputs and checkpoints
 vista_augur/outputs/
+eval/**/*.pt
+eval/**/*.pth
+/vista-augur-core-sync-*.tar.gz
 
 # Generated model/data artifacts kept locally
 target_model/**/*.pth
@@ -42,3 +45,8 @@ target_model/**/*.pt
 target_model/**/*.pickle
 target_model/**/*.p
 target_model/**/*.npz
+
+*.p
+*.npz
+*.pth
+*tive1
