@@ -1,0 +1,1 @@
+先由AJSMAdeepxxx.py生成扰动的数据序列，然后由对应的AJSMAdeepxxxEval.py生成可以绘图的结果文件。
